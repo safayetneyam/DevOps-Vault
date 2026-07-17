@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Vault</title>
+    <style>
+        :root {
+            /* Light theme tokens */
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-alt: #f1f5f9;
+            --border: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --text: #0f172a;
+            --text-muted: #475569;
+            --text-soft: #64748b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-soft: #dbeafe;
+            --danger: #dc2626;
+            --success: #15803d;
+            --code-bg: #1e293b;
+            --code-text: #e2e8f0;
+            --code-border: #0f172a;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            /* Global horizontal breathing room so content never hugs
+               the viewport edges. */
+            padding: 0 5%;
+        }
+
+        header {
+            background: var(--surface);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            letter-spacing: 0.02em;
+            font-weight: 700;
+        }
+
+        header h1 span { color: var(--accent); }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        #status {
+            font-size: 0.85rem;
+            color: var(--text-soft);
+            min-height: 1.2em;
+        }
+
+        #status.ok { color: var(--success); }
+        #status.err { color: var(--danger); }
+
+        /* 1fr (sidebar) / 3fr (main) layout */
+        main {
+            display: grid;
+            grid-template-columns: 1fr 3fr;
+            gap: 1.25rem;
+            padding: 1.25rem 1.5rem;
+            align-items: start;
+            min-height: calc(100vh - 65px);
+        }
+
+        @media (max-width: 900px) {
+            main { grid-template-columns: 1fr; }
+        }
+
+        aside.sidebar,
+        section.main {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.25rem;
+        }
+
+        h2 {
+            margin: 0 0 0.75rem;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        /* Sidebar header row: title on the left, Clear filters on the
+           right, both vertically centered via flex. */
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .sidebar-header h2 { margin: 0; }
+
+        input[type="text"],
+        textarea {
+            width: 100%;
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus,
+        textarea:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+            border-color: transparent;
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: 0;
+            border-radius: 6px;
+            padding: 0.55rem 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        button:hover,
+        button:focus { background: var(--accent-hover); }
+
+        /* Header link-buttons (Home, + New Snippet, Admin, etc.) get
+           the same accent-bordered ghost style across every page. */
+        a.ghost,
+        button.ghost {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            padding: 0.45rem 0.85rem;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        a.ghost:hover,
+        button.ghost:hover,
+        a.ghost:focus,
+        button.ghost:focus { background: var(--accent); color: #fff; }
+
+        button:disabled { opacity: 0.6; cursor: progress; }
+
+        /* Sidebar ----------------------------------------------------- */
+        #filter-tools {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 360px;
+            overflow-y: auto;
+        }
+
+        #filter-tools > li {
+            margin: 0;
+            padding: 0;
+        }
+
+        /* The <label> spans the full row and makes the text itself
+           clickable for the radio/checkbox (native label-for-input). */
+        .filter-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: var(--text);
+            cursor: pointer;
+            border: 1px solid transparent;
+            margin-bottom: 0.2rem;
+            user-select: none;
+        }
+
+        .filter-row:hover { background: var(--surface-alt); }
+
+        /* When the radio/checkbox inside the row is ticked, highlight
+           the row subtly so the active-filter state is visible. */
+        .filter-row:has(input:checked) {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .filter-row input {
+            margin: 0;
+            cursor: pointer;
+            accent-color: var(--accent);
+            flex-shrink: 0;
+        }
+
+        .filter-row .name {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .count {
+            background: var(--surface-alt);
+            color: var(--text-soft);
+            border-radius: 999px;
+            padding: 0.05rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .filter-row:has(input:checked) .count {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        /* Empty state for the tools list. */
+        #filter-tools > li.empty {
+            padding: 0.4rem 0.6rem;
+            color: var(--text-soft);
+            font-style: italic;
+            font-size: 0.85rem;
+            cursor: default;
+        }
+
+        /* Nested tag checkboxes rendered under the currently-selected
+           tool. Indented, slightly smaller, multi-select. */
+        .nested-tags {
+            list-style: none;
+            margin: 0 0 0.4rem 1.4rem;
+            padding: 0.25rem 0 0.25rem 0.6rem;
+            border-left: 2px solid var(--border-strong);
+        }
+
+        .nested-tags li {
+            margin: 0;
+            padding: 0;
+        }
+
+        .nested-tags .filter-row {
+            font-size: 0.85rem;
+            padding: 0.25rem 0.5rem;
+            margin-bottom: 0.1rem;
+        }
+
+        .nested-tags .filter-row:has(input:checked) {
+            background: var(--accent-soft);
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        /* "Clear filters" sits inline at the top right of the sidebar,
+           aligned with the section heading. */
+        #filter-clear {
+            font-size: 0.78rem;
+            color: var(--text-soft);
+            background: transparent;
+            border: 0;
+            padding: 0;
+            cursor: pointer;
+            text-decoration: underline;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        #filter-clear:hover { color: var(--accent); }
+
+        /* Main area --------------------------------------------------- */
+        .main-header {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .main-header input[type="text"] { flex: 1; }
+
+        .results-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 1.25rem;
+        }
+
+        #results {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            max-height: 520px;
+            overflow-y: auto;
+        }
+
+        #results li {
+            padding: 0.6rem 0.75rem;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            margin-bottom: 0.5rem;
+            background: var(--surface);
+        }
+
+        #results li:hover { background: var(--surface-alt); }
+
+        #results li.active {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent);
+        }
+
+        #results .title { font-weight: 600; }
+        #results .meta {
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+            font-size: 0.78rem;
+            color: var(--text-soft);
+            margin-top: 0.2rem;
+        }
+
+        #results .meta .lang,
+        #results .meta .tag {
+            background: var(--surface-alt);
+            padding: 0.05rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+        }
+
+        #results .empty,
+        #results .error {
+            color: var(--text-soft);
+            font-style: italic;
+            padding: 0.75rem;
+            border: 1px dashed var(--border-strong);
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        #results .error { color: var(--danger); font-style: normal; }
+
+        /* Code viewer ------------------------------------------------- */
+        #detail-card {
+            margin-top: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+            overflow: hidden;
+        }
+
+        #detail-card-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-alt);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        #detail-card-header .title {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        #detail-card-header .meta {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+            align-items: center;
+        }
+
+        #detail-card-header .chip {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 0.1rem 0.55rem;
+            border-radius: 999px;
+            color: var(--text-soft);
+        }
+
+        /* Hide/Show + Copy controls on the detail card. */
+        .card-btn {
+            background: var(--surface);
+            color: var(--text-muted);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            padding: 0.2rem 0.6rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            line-height: 1.4;
+        }
+
+        .card-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+        .card-btn:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .card-btn.copy.ok { background: var(--success); color: #fff; border-color: var(--success); }
+
+        /* Class toggled by the Hide/Show button. */
+        #detail-pre.hidden { display: none; }
+
+        pre {
+            background: var(--code-bg);
+            color: var(--code-text);
+            border-top: 1px solid var(--code-border);
+            margin: 0;
+            padding: 1rem;
+            overflow-x: auto;
+        }
+
+        pre code {
+            font-family: var(--mono);
+            font-size: 0.9rem;
+            white-space: pre;
+        }
+
+        #detail-empty {
+            color: var(--text-soft);
+            font-style: italic;
+            padding: 2rem 1rem;
+            text-align: center;
+            background: var(--surface-alt);
+            border-radius: 10px;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <a href="/" style="color: inherit; text-decoration: none;">
+                DevOps <span>Vault</span>
+            </a>
+        </h1>
+        <div class="header-actions">
+            <span id="status" aria-live="polite"></span>
+            <a href="/create/" class="ghost" role="button" id="new-btn">+ New Snippet</a>
+            <a href="/temp-admin/" class="ghost" role="button" id="admin-btn">Admin</a>
+        </div>
+    </header>
+
+    <main>
+        <aside class="sidebar" aria-label="Filter sidebar">
+            <div class="sidebar-header">
+                <h2>Filter by Tools / Stack</h2>
+                <button type="button" id="filter-clear" hidden>Clear filters</button>
+            </div>
+            <ul id="filter-tools" aria-label="Filter results by tool or stack"></ul>
+        </aside>
+
+        <section class="main" aria-label="Search and results">
+            <div class="main-header">
+                <form id="search-form" autocomplete="off" style="display:flex; gap:0.5rem; flex:1;">
+                    <input
+                        type="text"
+                        id="search-input"
+                        name="q"
+                        placeholder="Search snippets by title or tag..."
+                        aria-label="Search snippets"
+                    >
+                </form>
+            </div>
+
+            <div class="results-layout">
+                <div>
+                    <h2>Results</h2>
+                    <ul id="results" role="listbox" aria-label="Snippet results"></ul>
+                </div>
+            </div>
+
+            <div id="detail-empty">
+                Select a snippet from the list to view its code body.
+            </div>
+            <article id="detail-card" hidden>
+                <header id="detail-card-header">
+                    <span class="title" id="detail-title"></span>
+                    <span class="meta">
+                        <span class="chip" id="detail-lang"></span>
+                        <button type="button" id="detail-toggle" class="card-btn" aria-expanded="true" aria-controls="detail-pre">Hide</button>
+                        <button type="button" id="detail-copy" class="card-btn copy" aria-label="Copy code to clipboard">Copy</button>
+                    </span>
+                </header>
+                <pre id="detail-pre"><code id="detail-code"></code></pre>
+            </article>
+        </section>
+    </main>
+
+    <script>
+    (function () {
+        "use strict";
+
+        const API = "/api/snippets/";
+        const TOOL_FILTER_NAME = "tool-filter";   // radio group name
+
+        const els = {
+            searchForm: document.getElementById("search-form"),
+            searchInput: document.getElementById("search-input"),
+            results: document.getElementById("results"),
+            status: document.getElementById("status"),
+            filterTools: document.getElementById("filter-tools"),
+            filterClear: document.getElementById("filter-clear"),
+            detailEmpty: document.getElementById("detail-empty"),
+            detailCard: document.getElementById("detail-card"),
+            detailCode: document.getElementById("detail-code"),
+            detailTitle: document.getElementById("detail-title"),
+            detailLang: document.getElementById("detail-lang"),
+            detailPre: document.getElementById("detail-pre"),
+            detailToggle: document.getElementById("detail-toggle"),
+            detailCopy: document.getElementById("detail-copy"),
+        };
+
+        let allSnippets = [];
+        // Hierarchical filter state:
+        //   activeTool:    string | null    (radio: one tool at a time)
+        //   activeTags:    Set<string>      (checkboxes: multiple tags
+        //                                     nested under the selected tool)
+        let activeTool = null;
+        let activeTags = new Set();
+        let activeId = null;
+
+        function setStatus(msg, kind) {
+            els.status.textContent = msg || "";
+            els.status.className = kind || "";
+        }
+
+        // --------------------------------------------------------------
+        // Helpers
+        // --------------------------------------------------------------
+
+        /** Normalize a snippet's tool/language to a lowercase key. */
+        function toolKey(snippet) {
+            return (snippet.language || "").trim().toLowerCase() || "text";
+        }
+
+        /** Return the unique normalized tag list for a snippet. */
+        function tagKeys(snippet) {
+            if (!snippet.tags) return [];
+            return snippet.tags
+                .split(",")
+                .map((t) => t.trim().toLowerCase())
+                .filter(Boolean);
+        }
+
+        /** Build a label/input pair with an optional trailing badge. */
+        function makeRow(id, name, count, inputFactory) {
+            const label = document.createElement("label");
+            label.className = "filter-row";
+            label.setAttribute("for", id);
+
+            const input = inputFactory(id);
+            label.appendChild(input);
+
+            const nameEl = document.createElement("span");
+            nameEl.className = "name";
+            nameEl.textContent = name;
+            label.appendChild(nameEl);
+
+            if (count != null) {
+                const badge = document.createElement("span");
+                badge.className = "count";
+                badge.textContent = count;
+                label.appendChild(badge);
+            }
+            return label;
+        }
+
+        // --------------------------------------------------------------
+        // Sidebar rendering
+        // --------------------------------------------------------------
+
+        function buildSidebar(snippets) {
+            // Tool counts over the FULL dataset (so the counts stay
+            // stable even when nested-tag selection narrows the list).
+            const toolCounts = new Map();
+            for (const s of snippets) {
+                const tool = toolKey(s);
+                toolCounts.set(tool, (toolCounts.get(tool) || 0) + 1);
+            }
+            renderToolsList(els.filterTools, toolCounts);
+            els.filterClear.hidden = !(activeTool || activeTags.size > 0);
+        }
+
+        function renderToolsList(container, counts) {
+            container.innerHTML = "";
+            if (counts.size === 0) {
+                const li = document.createElement("li");
+                li.className = "empty";
+                li.textContent = "(none yet)";
+                container.appendChild(li);
+                return;
+            }
+            const sortedTools = Array.from(counts.keys()).sort();
+            for (const tool of sortedTools) {
+                const li = document.createElement("li");
+                const safeId = "tool-" + tool.replace(/[^a-z0-9]+/gi, "_");
+                const inputId = safeId + "-radio";
+
+                const row = makeRow(inputId, tool, counts.get(tool), (id) => {
+                    const r = document.createElement("input");
+                    r.type = "radio";
+                    r.name = TOOL_FILTER_NAME;
+                    r.id = id;
+                    r.value = tool;
+                    r.checked = (tool === activeTool);
+                    r.addEventListener("change", () => onToolSelected(tool));
+                    return r;
+                });
+                li.appendChild(row);
+
+                // If this tool is the active one, render the nested tag
+                // list directly under it.
+                if (tool === activeTool) {
+                    li.appendChild(renderNestedTags(tool));
+                }
+                container.appendChild(li);
+            }
+        }
+
+        /**
+         * Compute the unique tags present in snippets whose `language`
+         * matches `tool`, and render them as nested checkboxes.
+         * Returns the <ul> element to be appended under the tool row.
+         */
+        function renderNestedTags(tool) {
+            const ul = document.createElement("ul");
+            ul.className = "nested-tags";
+            ul.setAttribute("aria-label", "Tags for " + tool);
+
+            const tagCounts = new Map();
+            for (const s of allSnippets) {
+                if (toolKey(s) !== tool) continue;
+                for (const t of tagKeys(s)) {
+                    tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
+                }
+            }
+
+            if (tagCounts.size === 0) {
+                const li = document.createElement("li");
+                li.className = "empty";
+                li.style.padding = "0.25rem 0.5rem";
+                li.style.color = "var(--text-soft)";
+                li.style.fontStyle = "italic";
+                li.style.fontSize = "0.8rem";
+                li.textContent = "(no tags under this tool)";
+                ul.appendChild(li);
+                return ul;
+            }
+
+            const sortedTags = Array.from(tagCounts.keys()).sort();
+            for (const tag of sortedTags) {
+                const li = document.createElement("li");
+                const safeId =
+                    "tag-" + tool.replace(/[^a-z0-9]+/gi, "_") +
+                    "-" + tag.replace(/[^a-z0-9]+/gi, "_");
+                const inputId = safeId + "-cb";
+
+                const row = makeRow(inputId, "#" + tag, tagCounts.get(tag), (id) => {
+                    const cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.id = id;
+                    cb.value = tag;
+                    cb.checked = activeTags.has(tag);
+                    cb.addEventListener("change", () => onTagToggled(tag, cb.checked));
+                    return cb;
+                });
+                li.appendChild(row);
+                ul.appendChild(li);
+            }
+            return ul;
+        }
+
+        // --------------------------------------------------------------
+        // Event handlers
+        // --------------------------------------------------------------
+
+        /** User picked a tool radio button. Switch context and reset tags. */
+        function onToolSelected(tool) {
+            activeTool = tool;
+            // Per spec: changing the tool clears the tag selection so the
+            // nested list reflects the new tool's tags, not stale ones.
+            activeTags = new Set();
+            applyFilters();
+        }
+
+        /** User toggled a nested tag checkbox. */
+        function onTagToggled(tag, checked) {
+            if (checked) activeTags.add(tag);
+            else activeTags.delete(tag);
+            applyFilters();
+        }
+
+        // --------------------------------------------------------------
+        // Filtering
+        // --------------------------------------------------------------
+
+        function applyFilters() {
+            let filtered = allSnippets;
+
+            // 1. Tool filter (single-select; model normalizes to
+            //    lowercase, so we compare on the same form).
+            if (activeTool) {
+                filtered = filtered.filter((s) => toolKey(s) === activeTool);
+            }
+
+            // 2. Nested tag filter (OR semantics: a snippet matches if
+            //    it has ANY of the selected tags under the active tool).
+            //    Switch to AND by replacing .some with .every below.
+            if (activeTags.size > 0) {
+                filtered = filtered.filter((s) => {
+                    const tags = tagKeys(s);
+                    return tags.some((t) => activeTags.has(t));
+                });
+            }
+
+            // 3. Free-text search across title + tags.
+            const query = els.searchInput.value.trim();
+            if (query) {
+                const needle = query.toLowerCase();
+                filtered = filtered.filter(
+                    (s) =>
+                        (s.title || "").toLowerCase().includes(needle) ||
+                        (s.tags || "").toLowerCase().includes(needle)
+                );
+            }
+
+            renderResults(filtered);
+            // Rebuild sidebar so the active tool's radio stays ticked
+            // AND so its nested tag list reflects any tag toggles.
+            buildSidebar(allSnippets);
+
+            const summary =
+                filtered.length + " snippet(s)" +
+                (activeTool ? " · tool=" + activeTool : "") +
+                (activeTags.size
+                    ? " · tags=" + Array.from(activeTags).join(",")
+                    : "");
+            setStatus(summary, "ok");
+        }
+
+        // --------------------------------------------------------------
+        // Results + detail
+        // --------------------------------------------------------------
+
+        function renderResults(snippets) {
+            els.results.innerHTML = "";
+            if (!snippets.length) {
+                const li = document.createElement("li");
+                li.className = "empty";
+                li.textContent = "No snippets match.";
+                els.results.appendChild(li);
+                return;
+            }
+            for (const s of snippets) {
+                const li = document.createElement("li");
+                li.dataset.id = s.id;
+                if (s.id === activeId) li.classList.add("active");
+                li.setAttribute("role", "option");
+
+                const title = document.createElement("span");
+                title.className = "title";
+                title.textContent = s.title;
+
+                const meta = document.createElement("span");
+                meta.className = "meta";
+                const langChip = document.createElement("span");
+                langChip.className = "lang";
+                langChip.textContent = s.language || "text";
+                meta.appendChild(langChip);
+                tagKeys(s).forEach((tag) => {
+                    const tagChip = document.createElement("span");
+                    tagChip.className = "tag";
+                    tagChip.textContent = "#" + tag;
+                    meta.appendChild(tagChip);
+                });
+
+                li.appendChild(title);
+                li.appendChild(meta);
+                li.addEventListener("click", () => renderDetail(s));
+                els.results.appendChild(li);
+            }
+        }
+
+        function renderDetail(snippet) {
+            activeId = snippet.id;
+            els.detailEmpty.hidden = true;
+            els.detailCard.hidden = false;
+            // textContent preserves all whitespace, tabs, and newlines.
+            els.detailCode.textContent = snippet.code_body;
+            els.detailTitle.textContent = snippet.title;
+            els.detailLang.textContent = snippet.language || "text";
+            // Reset the toggle/copy controls to their default visible state
+            // every time a different snippet is opened.
+            showCode();
+            resetCopyButton();
+            document.querySelectorAll("#results li").forEach((node) => {
+                node.classList.toggle("active", Number(node.dataset.id) === snippet.id);
+            });
+        }
+
+        // --------------------------------------------------------------
+        // Detail card controls: Hide/Show + Copy
+        // --------------------------------------------------------------
+
+        /** Make the <pre><code> block visible and update the toggle label. */
+        function showCode() {
+            els.detailPre.classList.remove("hidden");
+            els.detailToggle.textContent = "Hide";
+            els.detailToggle.setAttribute("aria-expanded", "true");
+        }
+
+        /** Hide the <pre><code> block and flip the toggle label. */
+        function hideCode() {
+            els.detailPre.classList.add("hidden");
+            els.detailToggle.textContent = "Show";
+            els.detailToggle.setAttribute("aria-expanded", "false");
+        }
+
+        /** Restore the Copy button to its default label/state. */
+        function resetCopyButton() {
+            els.detailCopy.textContent = "Copy";
+            els.detailCopy.classList.remove("ok");
+            els.detailCopy.disabled = false;
+        }
+
+        // The buttons are part of the static DOM (not regenerated per
+        // snippet), so a single persistent listener per button is enough
+        // and survives every renderDetail() call.
+        els.detailToggle.addEventListener("click", () => {
+            if (els.detailPre.classList.contains("hidden")) showCode();
+            else hideCode();
+        });
+
+        els.detailCopy.addEventListener("click", async () => {
+            // Capture the snippet currently visible to the user. If the
+            // user somehow invokes Copy before opening a snippet, bail.
+            if (activeId == null) return;
+            const text = els.detailCode.textContent || "";
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(text);
+                } else {
+                    // Fallback for very old browsers / non-secure contexts.
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    ta.style.position = "fixed";
+                    ta.style.opacity = "0";
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                }
+                els.detailCopy.textContent = "Copied!";
+                els.detailCopy.classList.add("ok");
+                els.detailCopy.disabled = true;
+                setTimeout(() => {
+                    // Only revert if the user hasn't started another copy
+                    // attempt during the 2s window.
+                    resetCopyButton();
+                }, 2000);
+            } catch (err) {
+                setStatus("Copy failed: " + err.message, "err");
+            }
+        });
+
+        // --------------------------------------------------------------
+        // Data loading
+        // --------------------------------------------------------------
+
+        async function loadSnippets() {
+            setStatus("Loading...", "");
+            try {
+                const res = await fetch(API, { headers: { "Accept": "application/json" } });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                allSnippets = data;
+                buildSidebar(allSnippets);
+                applyFilters();
+            } catch (err) {
+                els.results.innerHTML = "";
+                const li = document.createElement("li");
+                li.className = "error";
+                li.textContent = "Failed to load: " + err.message;
+                els.results.appendChild(li);
+                setStatus("Error", "err");
+            }
+        }
+
+        // Search on submit (Enter) and on debounced input.
+        let debounceTimer = null;
+        els.searchInput.addEventListener("input", () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => applyFilters(), 200);
+        });
+        els.searchForm.addEventListener("submit", (e) => {
+            e.preventDefault();
+            clearTimeout(debounceTimer);
+            applyFilters();
+        });
+
+        els.filterClear.addEventListener("click", () => {
+            activeTool = null;
+            activeTags = new Set();
+            // Reset every radio and checkbox in the sidebar so the
+            // visual state matches the cleared filter state.
+            document
+                .querySelectorAll(
+                    '#filter-tools input[type="radio"], ' +
+                    '#filter-tools input[type="checkbox"]'
+                )
+                .forEach((inp) => { inp.checked = false; });
+            applyFilters();
+        });
+
+        // Initial load.
+        loadSnippets();
+
+        // Listen for snippets created on /create/ (via sessionStorage
+        // flag) so the home view refreshes when the user returns.
+        window.addEventListener("pageshow", (e) => {
+            if (sessionStorage.getItem("vault.just_created") === "1") {
+                sessionStorage.removeItem("vault.just_created");
+                loadSnippets();
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

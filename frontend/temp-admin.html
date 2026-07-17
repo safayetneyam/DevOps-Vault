@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - DevOps Vault</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-alt: #f1f5f9;
+            --border: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --text: #0f172a;
+            --text-muted: #475569;
+            --text-soft: #64748b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --accent-soft: #dbeafe;
+            --danger: #dc2626;
+            --danger-hover: #b91c1c;
+            --success: #15803d;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            /* Global horizontal breathing room so content never hugs
+               the viewport edges. */
+            padding: 0 5%;
+        }
+
+        header {
+            background: var(--surface);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            letter-spacing: 0.02em;
+            font-weight: 700;
+        }
+
+        header h1 span { color: var(--accent); }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        #status {
+            font-size: 0.85rem;
+            color: var(--text-soft);
+            min-height: 1.2em;
+        }
+        #status.ok { color: var(--success); }
+        #status.err { color: var(--danger); }
+
+        /* Header link-buttons (Home, + New Snippet, Admin, etc.) get
+           the same accent-bordered ghost style across every page. */
+        a.ghost,
+        button.ghost {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            padding: 0.45rem 0.85rem;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+        a.ghost:hover,
+        button.ghost:hover,
+        a.ghost:focus,
+        button.ghost:focus { background: var(--accent); color: #fff; }
+
+        main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem 0;
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .toolbar h2 {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+
+        /* Delete button is disabled when zero items are selected. */
+        #delete-btn {
+            background: var(--danger);
+            color: #fff;
+            border: 0;
+            border-radius: 6px;
+            padding: 0.55rem 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        #delete-btn:hover:not(:disabled) { background: var(--danger-hover); }
+        #delete-btn:disabled {
+            background: var(--surface-alt);
+            color: var(--text-soft);
+            cursor: not-allowed;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 0.7rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.92rem;
+        }
+
+        /* Center the only header column we actually use (the checkbox). */
+        thead th {
+            background: var(--surface-alt);
+            text-align: center;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            width: 60px;
+        }
+
+        /* Make the checkbox column narrow and center-aligned. */
+        td.col-check { text-align: center; width: 60px; }
+        td.col-title { word-break: break-word; }
+        td.col-edit  { text-align: right; width: 80px; }
+
+        /* The GROUP HEADER row spans all 3 columns, centered. */
+        tr.group-header td {
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-weight: 700;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.85rem;
+            padding: 0.55rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr.data-row:hover { background: var(--surface-alt); }
+
+        /* The "select all in group" header checkbox visual aid. */
+        tr.group-header td .group-select {
+            margin-right: 0.5rem;
+            accent-color: var(--accent);
+        }
+
+        input[type="checkbox"] {
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        a.edit-link {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        a.edit-link:hover { text-decoration: underline; }
+
+        .empty-state {
+            text-align: center;
+            color: var(--text-soft);
+            font-style: italic;
+            padding: 2rem 1rem;
+        }
+
+        .loading, .error {
+            text-align: center;
+            padding: 1rem;
+            color: var(--text-soft);
+            font-style: italic;
+        }
+        .error { color: var(--danger); font-style: normal; }
+
+        /* --------------------------------------------------------------
+           Admin layout: 1/4 sidebar (Manage Tools/Stacks) + 3/4 table.
+           Uses CSS grid so the two columns stay locked to that ratio
+           regardless of how wide the viewport gets.
+           -------------------------------------------------------------- */
+        .admin-grid {
+            display: grid;
+            grid-template-columns: 1fr 3fr;
+            gap: 1.25rem;
+            align-items: start;
+        }
+
+        /* The left sidebar listing unique Tools/Stacks. */
+        #tools-sidebar {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem;
+            position: sticky;
+            top: 1rem;
+            max-height: calc(100vh - 2rem);
+            overflow-y: auto;
+        }
+
+        #tools-sidebar h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        #tools-sidebar .sidebar-hint {
+            font-size: 0.78rem;
+            color: var(--text-soft);
+            margin: 0 0 0.85rem 0;
+        }
+
+        #tools-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #tools-list li.tool-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.5rem;
+            padding: 0.55rem 0.65rem;
+            border-radius: 6px;
+            border: 1px solid transparent;
+        }
+        #tools-list li.tool-row:hover {
+            background: var(--surface-alt);
+            border-color: var(--border);
+        }
+
+        #tools-list .tool-name {
+            font-weight: 600;
+            font-size: 0.92rem;
+            color: var(--text);
+            flex: 1 1 auto;
+            min-width: 0;
+            word-break: break-word;
+        }
+
+        /* Inline-edit input replaces .tool-name when user clicks Edit. */
+        #tools-list .tool-edit-input {
+            flex: 1 1 auto;
+            min-width: 0;
+            font: inherit;
+            font-size: 0.92rem;
+            font-weight: 600;
+            padding: 0.3rem 0.45rem;
+            border: 1px solid var(--accent);
+            border-radius: 5px;
+            background: #fff;
+            color: var(--text);
+        }
+
+        #tools-list .tool-count {
+            font-size: 0.75rem;
+            color: var(--text-soft);
+            background: var(--surface-alt);
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            margin-left: 0.25rem;
+            flex: 0 0 auto;
+        }
+
+        #tools-list .tool-actions {
+            display: flex;
+            gap: 0.25rem;
+            flex: 0 0 auto;
+        }
+
+        /* Tiny icon-style buttons used inside the sidebar. */
+        .icon-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            border-radius: 5px;
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 0.9rem;
+            line-height: 1;
+            padding: 0;
+            font-family: inherit;
+        }
+        .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .icon-btn.danger { color: var(--danger); border-color: var(--border); }
+        .icon-btn.danger:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+        .icon-btn.save { color: var(--success); }
+        .icon-btn.save:hover { background: var(--success); color: #fff; border-color: var(--success); }
+        .icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .sidebar-empty {
+            text-align: center;
+            color: var(--text-soft);
+            font-style: italic;
+            font-size: 0.85rem;
+            padding: 0.75rem 0.5rem;
+        }
+
+        /* On narrower screens, stack the two columns vertically
+           so the sidebar isn't crushed. */
+        @media (max-width: 800px) {
+            .admin-grid { grid-template-columns: 1fr; }
+            #tools-sidebar { position: static; max-height: none; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <a href="/" style="color: inherit; text-decoration: none;">
+                DevOps <span>Vault</span>
+            </a>
+        </h1>
+        <div class="header-actions">
+            <span id="status" aria-live="polite"></span>
+            <a href="/" class="ghost" role="button">&larr; Home</a>
+        </div>
+    </header>
+
+    <main>
+        <div class="admin-grid">
+            <!-- 1/4: Manage Tools/Stacks sidebar -->
+            <aside id="tools-sidebar" aria-label="Manage tools and stacks">
+                <h2>Manage Tools/Stacks</h2>
+                <p class="sidebar-hint">Each row is a unique language. Edit to rename across all snippets, or delete to remove the entire group.</p>
+                <ul id="tools-list">
+                    <li class="sidebar-empty">Loading tools...</li>
+                </ul>
+            </aside>
+
+            <!-- 3/4: existing snippets table -->
+            <section>
+                <div class="toolbar">
+                    <h2>All Snippets</h2>
+                    <button type="button" id="delete-btn" disabled>Delete 0 Item(s)</button>
+                </div>
+
+                <div id="table-wrap">
+                    <p class="loading">Loading snippets...</p>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+    (function () {
+        "use strict";
+
+        const API_LIST = "/api/snippets/";
+        const API_BATCH = "/api/snippets/batch-delete/";
+        const API_BULK_RENAME = "/api/snippets/bulk-rename-tool/";
+        const API_BULK_DELETE_TOOL = "/api/snippets/bulk-delete-tool/";
+
+        const els = {
+            status: document.getElementById("status"),
+            tableWrap: document.getElementById("table-wrap"),
+            deleteBtn: document.getElementById("delete-btn"),
+            toolsList: document.getElementById("tools-list"),
+        };
+
+        // Cache the last-loaded snippet array so the sidebar can derive
+        // its tool list + counts from the same source of truth as the
+        // table, without an extra API call.
+        let lastSnippets = [];
+
+        // Set of currently-checked snippet IDs (across all groups).
+        let checkedIds = new Set();
+
+        function setStatus(msg, kind) {
+            els.status.textContent = msg || "";
+            els.status.className = kind || "";
+        }
+
+        /** Lowercased tool key (the API normalizes too). */
+        function toolKey(snippet) {
+            return (snippet.language || "").trim().toLowerCase() || "text";
+        }
+
+        function plural(n) { return n === 1 ? "Item" : "Items"; }
+
+        /** Reflect the current checkedIds set on the Delete button. */
+        function updateDeleteButton() {
+            const n = checkedIds.size;
+            els.deleteBtn.textContent = "Delete " + n + " " + plural(n);
+            els.deleteBtn.disabled = (n === 0);
+        }
+
+        // --------------------------------------------------------------
+        // Rendering
+        // --------------------------------------------------------------
+
+        function renderTable(snippets) {
+            els.tableWrap.innerHTML = "";
+
+            if (!snippets.length) {
+                const p = document.createElement("p");
+                p.className = "empty-state";
+                p.textContent = "No snippets yet. Create one to get started.";
+                els.tableWrap.appendChild(p);
+                return;
+            }
+
+            // Group snippets by tool.
+            const groups = new Map();
+            for (const s of snippets) {
+                const tool = toolKey(s);
+                if (!groups.has(tool)) groups.set(tool, []);
+                groups.get(tool).push(s);
+            }
+
+            // Sort group names alphabetically for deterministic order.
+            const sortedTools = Array.from(groups.keys()).sort();
+
+            const table = document.createElement("table");
+
+            // The thead just contains the single "Select" column header.
+            // Group headers (full-width group rows) sit inside the tbody.
+            const thead = document.createElement("thead");
+            const headRow = document.createElement("tr");
+            const headTh = document.createElement("th");
+            headTh.textContent = "Select";
+            headTh.setAttribute("aria-label", "Select column");
+            headRow.appendChild(headTh);
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+
+            const tbody = document.createElement("tbody");
+
+            for (const tool of sortedTools) {
+                const items = groups.get(tool);
+
+                // --- GROUP HEADER ROW (spans all 3 columns) ---
+                const groupRow = document.createElement("tr");
+                groupRow.className = "group-header";
+                const groupCell = document.createElement("td");
+                groupCell.colSpan = 3;
+                groupCell.textContent = tool;
+                groupRow.appendChild(groupCell);
+                tbody.appendChild(groupRow);
+
+                // --- DATA ROWS (one per snippet under this tool) ---
+                for (const s of items) {
+                    const row = document.createElement("tr");
+                    row.className = "data-row";
+                    row.dataset.id = String(s.id);
+
+                    // Column 1: checkbox.
+                    const tdCheck = document.createElement("td");
+                    tdCheck.className = "col-check";
+                    const cb = document.createElement("input");
+                    cb.type = "checkbox";
+                    cb.dataset.id = String(s.id);
+                    cb.checked = checkedIds.has(s.id);
+                    cb.setAttribute("aria-label", "Select snippet " + s.id);
+                    cb.addEventListener("change", () => onRowToggled(s.id, cb.checked));
+                    tdCheck.appendChild(cb);
+                    row.appendChild(tdCheck);
+
+                    // Column 2: title.
+                    const tdTitle = document.createElement("td");
+                    tdTitle.className = "col-title";
+                    tdTitle.textContent = s.title || "(untitled)";
+                    row.appendChild(tdTitle);
+
+                    // Column 3: edit link.
+                    const tdEdit = document.createElement("td");
+                    tdEdit.className = "col-edit";
+                    const a = document.createElement("a");
+                    a.className = "edit-link";
+                    a.href = "/edit/" + s.id + "/";
+                    a.textContent = "Edit";
+                    tdEdit.appendChild(a);
+                    row.appendChild(tdEdit);
+
+                    tbody.appendChild(row);
+                }
+            }
+
+            table.appendChild(tbody);
+            els.tableWrap.appendChild(table);
+        }
+
+        // --------------------------------------------------------------
+        // Event handlers
+        // --------------------------------------------------------------
+
+        function onRowToggled(id, checked) {
+            if (checked) checkedIds.add(id);
+            else checkedIds.delete(id);
+            updateDeleteButton();
+        }
+
+        async function onDeleteClicked() {
+            const ids = Array.from(checkedIds);
+            if (ids.length === 0) return;
+
+            // Native confirmation dialog. If the user hits Cancel,
+            // window.confirm() returns false and we abort the delete
+            // without touching the server.
+            const ok = window.confirm(
+                "Are you sure you want to delete the selected item(s)?"
+            );
+            if (!ok) return;
+
+            els.deleteBtn.disabled = true;
+            const originalText = els.deleteBtn.textContent;
+            els.deleteBtn.textContent = "Deleting...";
+
+            try {
+                const res = await fetch(API_BATCH, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    body: JSON.stringify({ ids: ids }),
+                });
+                if (!res.ok) {
+                    const txt = await res.text();
+                    throw new Error("HTTP " + res.status + ": " + txt);
+                }
+                const body = await res.json();
+                setStatus("Deleted " + (body.deleted || 0) + " snippet(s).", "ok");
+                // Clear selection and re-render.
+                checkedIds = new Set();
+                await loadAndRender();
+            } catch (err) {
+                setStatus("Delete failed: " + err.message, "err");
+                els.deleteBtn.disabled = false;
+                els.deleteBtn.textContent = originalText;
+            }
+        }
+
+        // --------------------------------------------------------------
+        // Data loading
+        // --------------------------------------------------------------
+
+        async function loadAndRender() {
+            try {
+                const res = await fetch(API_LIST, {
+                    headers: { "Accept": "application/json" },
+                });
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                const data = await res.json();
+                lastSnippets = data;
+                renderTable(data);
+                renderSidebar(data);
+                updateDeleteButton();
+            } catch (err) {
+                els.tableWrap.innerHTML = "";
+                const p = document.createElement("p");
+                p.className = "error";
+                p.textContent = "Failed to load snippets: " + err.message;
+                els.tableWrap.appendChild(p);
+                setStatus("Error", "err");
+            }
+        }
+
+        // --------------------------------------------------------------
+        // Sidebar: Manage Tools/Stacks
+        // --------------------------------------------------------------
+
+        /**
+         * Build the unique-tools list (with per-tool snippet counts) from
+         * the already-loaded snippet array and render one <li> per tool.
+         */
+        function renderSidebar(snippets) {
+            els.toolsList.innerHTML = "";
+
+            if (!snippets.length) {
+                const li = document.createElement("li");
+                li.className = "sidebar-empty";
+                li.textContent = "No tools yet.";
+                els.toolsList.appendChild(li);
+                return;
+            }
+
+            // Aggregate counts per tool key.
+            const counts = new Map();
+            for (const s of snippets) {
+                const k = toolKey(s);
+                counts.set(k, (counts.get(k) || 0) + 1);
+            }
+
+            const sortedTools = Array.from(counts.keys()).sort();
+            for (const tool of sortedTools) {
+                els.toolsList.appendChild(buildToolRow(tool, counts.get(tool)));
+            }
+        }
+
+        /** One sidebar row: name + count + Edit + Delete icon buttons. */
+        function buildToolRow(toolName, count) {
+            const li = document.createElement("li");
+            li.className = "tool-row";
+            li.dataset.tool = toolName;
+
+            // Tool name span.
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "tool-name";
+            nameSpan.textContent = toolName;
+            li.appendChild(nameSpan);
+
+            // Count badge.
+            const countSpan = document.createElement("span");
+            countSpan.className = "tool-count";
+            countSpan.textContent = String(count);
+            li.appendChild(countSpan);
+
+            // Edit icon (pencil).
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "icon-btn";
+            editBtn.title = "Rename tool";
+            editBtn.setAttribute("aria-label", "Rename tool " + toolName);
+            editBtn.textContent = "\u270E"; // ✎
+            editBtn.addEventListener("click", () => enterEditMode(li, toolName));
+            li.appendChild(editBtn);
+
+            // Delete icon (trash).
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "icon-btn danger";
+            delBtn.title = "Delete all snippets with this tool";
+            delBtn.setAttribute("aria-label", "Delete tool " + toolName);
+            delBtn.textContent = "\u2716"; // ✖
+            delBtn.addEventListener("click", () => onDeleteToolClicked(toolName));
+            li.appendChild(delBtn);
+
+            return li;
+        }
+
+        /**
+         * Replace the static name span with an <input> + Tick/Cross icons.
+         * Cross reverts; Tick fires the bulk-rename endpoint, then rebuilds
+         * the table (and the sidebar) on success.
+         */
+        function enterEditMode(li, oldName) {
+            const nameSpan = li.querySelector(".tool-name");
+            const countSpan = li.querySelector(".tool-count");
+            const actions = li.querySelectorAll(".icon-btn");
+            if (!nameSpan) return;
+
+            // Hide the static action buttons while editing so the row
+            // shows only the input + Tick/Cross.
+            actions.forEach((b) => { b.style.display = "none"; });
+
+            const input = document.createElement("input");
+            input.type = "text";
+            input.className = "tool-edit-input";
+            input.value = oldName;
+            input.setAttribute("aria-label", "New name for " + oldName);
+
+            // Tick (save).
+            const tickBtn = document.createElement("button");
+            tickBtn.type = "button";
+            tickBtn.className = "icon-btn save";
+            tickBtn.title = "Save";
+            tickBtn.setAttribute("aria-label", "Save rename");
+            tickBtn.textContent = "\u2713"; // ✓
+
+            // Cross (cancel).
+            const crossBtn = document.createElement("button");
+            crossBtn.type = "button";
+            crossBtn.className = "icon-btn danger";
+            crossBtn.title = "Cancel";
+            crossBtn.setAttribute("aria-label", "Cancel rename");
+            crossBtn.textContent = "\u2715"; // ✕
+
+            // Replace name span with input; keep count; add tick + cross.
+            li.replaceChild(input, nameSpan);
+            li.insertBefore(tickBtn, countSpan.nextSibling);
+            li.insertBefore(crossBtn, tickBtn);
+            input.focus();
+            input.select();
+
+            function exit(revert) {
+                // Remove input + tick + cross.
+                if (input.parentNode === li) li.removeChild(input);
+                if (tickBtn.parentNode === li) li.removeChild(tickBtn);
+                if (crossBtn.parentNode === li) li.removeChild(crossBtn);
+                if (revert) {
+                    // Restore original name span.
+                    const restored = document.createElement("span");
+                    restored.className = "tool-name";
+                    restored.textContent = oldName;
+                    li.insertBefore(restored, countSpan);
+                }
+                // Re-show the static action buttons.
+                actions.forEach((b) => { b.style.display = ""; });
+            }
+
+            crossBtn.addEventListener("click", () => exit(true));
+
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    tickBtn.click();
+                } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    crossBtn.click();
+                }
+            });
+
+            tickBtn.addEventListener("click", async () => {
+                const newName = input.value.trim();
+                if (!newName) {
+                    setStatus("New name cannot be empty.", "err");
+                    input.focus();
+                    return;
+                }
+                if (newName.toLowerCase() === oldName.toLowerCase()) {
+                    // No-op: just exit edit mode without hitting the API.
+                    exit(true);
+                    return;
+                }
+                tickBtn.disabled = true;
+                crossBtn.disabled = true;
+                input.disabled = true;
+                try {
+                    const res = await fetch(API_BULK_RENAME, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                        },
+                        body: JSON.stringify({ old: oldName, new: newName }),
+                    });
+                    if (!res.ok) {
+                        const txt = await res.text();
+                        throw new Error("HTTP " + res.status + ": " + txt);
+                    }
+                    const body = await res.json();
+                    setStatus(
+                        "Renamed \"" + oldName + "\" -> \"" + newName + "\" ("
+                            + (body.updated || 0) + " snippet(s)).",
+                        "ok"
+                    );
+                    // Refresh from the server so both sidebar and table
+                    // reflect the new tool name.
+                    await loadAndRender();
+                } catch (err) {
+                    setStatus("Rename failed: " + err.message, "err");
+                    tickBtn.disabled = false;
+                    crossBtn.disabled = false;
+                    input.disabled = false;
+                    input.focus();
+                    input.select();
+                }
+            });
+        }
+
+        /**
+         * Confirm + bulk-delete every snippet under the given tool, then
+         * refresh both the sidebar and the table.
+         */
+        async function onDeleteToolClicked(toolName) {
+            const ok = window.confirm(
+                "Delete ALL snippets under the tool \"" + toolName + "\"?\n\n"
+                    + "This cannot be undone."
+            );
+            if (!ok) return;
+
+            try {
+                const res = await fetch(API_BULK_DELETE_TOOL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    body: JSON.stringify({ tool: toolName }),
+                });
+                if (!res.ok) {
+                    const txt = await res.text();
+                    throw new Error("HTTP " + res.status + ": " + txt);
+                }
+                const body = await res.json();
+                setStatus(
+                    "Deleted " + (body.deleted || 0) + " snippet(s) under \""
+                        + toolName + "\".",
+                    "ok"
+                );
+                // Clear any selections that just got nuked.
+                checkedIds = new Set();
+                await loadAndRender();
+            } catch (err) {
+                setStatus("Tool delete failed: " + err.message, "err");
+            }
+        }
+
+        // Persistent listener on the Delete button.
+        els.deleteBtn.addEventListener("click", onDeleteClicked);
+
+        // Initial load.
+        loadAndRender();
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Secrets and local env never baked into image
+.env
+.env.*
+!.env.example
+
+# IDE / OS junk
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+
+# Docker artifacts
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md

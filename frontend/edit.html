@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Snippet - DevOps Vault</title>
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-alt: #f1f5f9;
+            --border: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --text: #0f172a;
+            --text-muted: #475569;
+            --text-soft: #64748b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
+            --danger: #dc2626;
+            --success: #15803d;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+            /* Global horizontal breathing room so content never hugs
+               the viewport edges. */
+            padding: 0 5%;
+        }
+
+        header {
+            background: var(--surface);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            letter-spacing: 0.02em;
+            font-weight: 700;
+        }
+
+        header h1 span { color: var(--accent); }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        main {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 1.5rem 0;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        }
+
+        h2 {
+            margin: 0 0 1rem;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        .field { margin-bottom: 1rem; }
+        .field label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="text"]:focus,
+        select,
+        textarea {
+            width: 100%;
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            padding: 0.65rem 0.8rem;
+            font-size: 0.95rem;
+            font-family: inherit;
+        }
+
+        input[type="text"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: 2px solid var(--accent);
+            outline-offset: 1px;
+            border-color: transparent;
+        }
+
+        select {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image:
+                linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+            background-position:
+                calc(100% - 18px) calc(50% - 2px),
+                calc(100% - 13px) calc(50% - 2px);
+            background-size: 5px 5px, 5px 5px;
+            background-repeat: no-repeat;
+            padding-right: 2rem;
+        }
+
+        textarea {
+            font-family: var(--mono);
+            min-height: 220px;
+            resize: vertical;
+            white-space: pre;
+            line-height: 1.45;
+        }
+
+        .field-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        @media (max-width: 600px) {
+            .field-row { grid-template-columns: 1fr; }
+        }
+
+        .actions {
+            margin-top: 1.25rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        /* Single source of truth for the form-button SHAPE. Both the
+           primary submit ("Edit Snippet") and the Cancel anchor share
+           these EXACT shape rules so they are pixel-identical except
+           for color. Scoped to actual interactive form-button elements:
+             - every real <button> (incl. type="submit")
+             - anchors explicitly marked with .btn or .danger
+           so the header logo / ghost links are NOT turned into buttons. */
+        button,
+        a.btn,
+        a.danger {
+            border: 0;
+            border-radius: 6px;
+            padding: 0.6rem 1.1rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            font-family: inherit;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+
+        /* Primary (accent) variant — used by "Edit Snippet". */
+        button.btn-primary,
+        a.btn-primary,
+        button[type="submit"] {
+            background: var(--accent);
+            color: #fff;
+        }
+        button.btn-primary:hover,
+        button.btn-primary:focus,
+        a.btn-primary:hover,
+        a.btn-primary:focus,
+        button[type="submit"]:hover,
+        button[type="submit"]:focus {
+            background: var(--accent-hover);
+        }
+
+        /* Header link-buttons (Home, + New Snippet, Admin, etc.) get
+           the same accent-bordered ghost style across every page. */
+        a.ghost,
+        button.ghost {
+            background: transparent;
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            padding: 0.45rem 0.85rem;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        a.ghost:hover,
+        button.ghost:hover { background: var(--accent); color: #fff; }
+
+        /* Red solid-button style. Shares the EXACT same shape rules
+           as the primary button so Cancel + Edit Snippet match
+           pixel-for-pixel except for color. */
+        a.danger,
+        button.danger {
+            background: var(--danger);
+            color: #fff;
+        }
+
+        a.danger:hover,
+        a.danger:focus,
+        button.danger:hover,
+        button.danger:focus { background: #b91c1c; color: #fff; }
+
+        button:disabled { opacity: 0.6; cursor: progress; }
+
+        #status {
+            font-size: 0.9rem;
+            color: var(--text-soft);
+            margin-right: auto;
+        }
+        #status.ok { color: var(--success); }
+        #status.err { color: var(--danger); }
+
+        /* Loading state shown while we fetch the snippet. */
+        #loading {
+            color: var(--text-soft);
+            font-style: italic;
+            padding: 0.5rem 0;
+        }
+        #form-card.hidden { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <a href="/" style="color: inherit; text-decoration: none;">
+                DevOps <span>Vault</span>
+            </a>
+        </h1>
+        <div class="header-actions">
+            <a href="/temp-admin/" class="ghost" role="button">&larr; Back to Admin</a>
+        </div>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2 id="form-heading">Edit Snippet</h2>
+
+            <p id="loading">Loading snippet&hellip;</p>
+
+            <form id="edit-form" class="hidden" autocomplete="off" novalidate>
+                <div class="field">
+                    <label for="f-title">Title</label>
+                    <input type="text" id="f-title" name="title" required maxlength="255" placeholder="Force Delete K8s Namespace">
+                </div>
+                <div class="field">
+                    <label for="f-code">Code Body</label>
+                    <textarea id="f-code" name="code_body" required spellcheck="false"
+                              placeholder="kubectl delete ns foo --force --grace-period=0"></textarea>
+                </div>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="f-language">Tools / Stack</label>
+                        <select id="f-language" name="language" required>
+                            <option value="" disabled>Select a tool or stack&hellip;</option>
+                            <option value="kubernetes">kubernetes</option>
+                            <option value="docker">docker</option>
+                            <option value="linux">linux</option>
+                            <option value="python">python</option>
+                            <option value="django">django</option>
+                            <option value="postgresql">postgresql</option>
+                            <option value="github-actions">github-actions</option>
+                            <option value="bash">bash</option>
+                            <option value="jenkins">jenkins</option>
+                            <option value="groovy">groovy</option>
+                            <option value="terraform">terraform</option>
+                            <option value="ansible">ansible</option>
+                            <option value="aws">aws</option>
+                            <option value="prometheus">prometheus</option>
+                            <option value="grafana">grafana</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="f-tags">Tags (comma-separated)</label>
+                        <input type="text" id="f-tags" name="tags"
+                               placeholder="k8s, cleanup"
+                               autocomplete="off">
+                    </div>
+                </div>
+                <div class="actions">
+                    <span id="status" aria-live="polite"></span>
+                    <a href="/temp-admin/" class="danger">Cancel</a>
+                    <button type="submit" id="save-btn">Edit Snippet</button>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <script>
+    (function () {
+        "use strict";
+
+        // --------------------------------------------------------------
+        // Extract the snippet ID from the URL: /edit/<id>/
+        // --------------------------------------------------------------
+        const pathParts = window.location.pathname.split("/").filter(Boolean);
+        // pathParts looks like ["edit", "<id>"] for /edit/12/
+        const snippetId = parseInt(pathParts[pathParts.length - 1], 10);
+
+        const API_DETAIL = "/api/snippets/" + snippetId + "/";
+
+        const els = {
+            loading: document.getElementById("loading"),
+            form: document.getElementById("edit-form"),
+            heading: document.getElementById("form-heading"),
+            title: document.getElementById("f-title"),
+            code: document.getElementById("f-code"),
+            language: document.getElementById("f-language"),
+            tags: document.getElementById("f-tags"),
+            saveBtn: document.getElementById("save-btn"),
+            status: document.getElementById("status"),
+        };
+
+        function setStatus(msg, kind) {
+            els.status.textContent = msg || "";
+            els.status.className = kind || "";
+        }
+
+        // Defense-in-depth: even though the model.save() normalizes,
+        // we lowercase tags here so the wire payload is canonical.
+        function normalizeTags(raw) {
+            return raw
+                .split(/[,\s]+/)
+                .map((t) => t.trim().toLowerCase())
+                .filter(Boolean)
+                .filter((t, i, arr) => arr.indexOf(t) === i)
+                .join(", ");
+        }
+
+        // --------------------------------------------------------------
+        // Bail out cleanly if the URL didn't carry a usable id.
+        // --------------------------------------------------------------
+        if (!Number.isFinite(snippetId) || snippetId <= 0) {
+            els.loading.textContent =
+                "Invalid snippet ID in URL. Open this page from the admin table.";
+            return;
+        }
+
+        // --------------------------------------------------------------
+        // Fetch the snippet and pre-fill the form.
+        // --------------------------------------------------------------
+        async function loadSnippet() {
+            try {
+                const res = await fetch(API_DETAIL, {
+                    headers: { "Accept": "application/json" },
+                });
+                if (res.status === 404) {
+                    els.loading.textContent =
+                        "Snippet #" + snippetId + " was not found.";
+                    return;
+                }
+                if (!res.ok) {
+                    throw new Error("HTTP " + res.status);
+                }
+                const snippet = await res.json();
+
+                // Pre-fill every field. The model normalizes language to
+                // lowercase, so the API value is always lowercase too.
+                els.title.value = snippet.title || "";
+                els.code.value = snippet.code_body || "";
+
+                // Match the option whose value equals the snippet's
+                // language; if none matches (custom value), append a new
+                // option so the user can still see + edit it.
+                const lang = (snippet.language || "").toLowerCase();
+                let matched = false;
+                for (const opt of els.language.options) {
+                    if (opt.value === lang) { opt.selected = true; matched = true; }
+                }
+                if (!matched && lang) {
+                    const opt = document.createElement("option");
+                    opt.value = lang;
+                    opt.textContent = lang;
+                    opt.selected = true;
+                    els.language.appendChild(opt);
+                }
+
+                els.tags.value = snippet.tags || "";
+
+                // Reveal the form, hide the loading line.
+                els.loading.hidden = true;
+                els.form.classList.remove("hidden");
+                els.heading.textContent =
+                    "Edit Snippet #" + snippet.id + " \u2014 " + (snippet.title || "");
+            } catch (err) {
+                els.loading.textContent = "Failed to load: " + err.message;
+            }
+        }
+
+        // --------------------------------------------------------------
+        // Submit handler: PUT the form back to the API.
+        // --------------------------------------------------------------
+        els.form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const payload = {
+                title: els.title.value.trim(),
+                code_body: els.code.value,
+                language: els.language.value.trim().toLowerCase(),
+                tags: normalizeTags(els.tags.value),
+            };
+            if (!payload.title || !payload.code_body) {
+                setStatus("Title and Code Body are required.", "err");
+                return;
+            }
+            if (!payload.language) {
+                setStatus("Please choose a Tools / Stack value.", "err");
+                return;
+            }
+
+            els.saveBtn.disabled = true;
+            setStatus("Saving...", "");
+            try {
+                const res = await fetch(API_DETAIL, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    throw new Error(
+                        (body && body.detail) || ("HTTP " + res.status)
+                    );
+                }
+                const updated = await res.json();
+                setStatus(
+                    "Saved \"" + (updated.title || "") + "\". Redirecting...",
+                    "ok"
+                );
+                // Brief pause so the user sees the confirmation, then
+                // bounce back to the admin table.
+                setTimeout(() => {
+                    window.location.href = "/temp-admin/";
+                }, 500);
+            } catch (err) {
+                setStatus("Save failed: " + err.message, "err");
+                els.saveBtn.disabled = false;
+            }
+        });
+
+        loadSnippet();
+    })();
+    </script>
+</body>
+</html>
