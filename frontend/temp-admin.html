@@ -410,6 +410,24 @@
             els.status.className = kind || "";
         }
 
+        /**
+         * Ask the user for the shared vault password.
+         * Returns the trimmed password string on success, or ``null`` if
+         * the user cancelled / left the field blank. Every destructive
+         * action on this page funnels through here so the UI is
+         * consistent and so the password is never reused across saves
+         * (the spec is "re-prompt on every save", no session unlock).
+         */
+        function promptVaultPassword(reason) {
+            const pw = window.prompt(
+                (reason || "Enter the vault password:") + "\n\n"
+                    + "Leave blank and press OK to cancel."
+            );
+            if (pw === null) return null;          // user pressed Cancel
+            const trimmed = pw.trim();
+            return trimmed || null;                // empty string == cancel
+        }
+
         /** Lowercased tool key (the API normalizes too). */
         function toolKey(snippet) {
             return (snippet.language || "").trim().toLowerCase() || "text";
@@ -533,13 +551,14 @@
             const ids = Array.from(checkedIds);
             if (ids.length === 0) return;
 
-            // Native confirmation dialog. If the user hits Cancel,
-            // window.confirm() returns false and we abort the delete
-            // without touching the server.
-            const ok = window.confirm(
-                "Are you sure you want to delete the selected item(s)?"
+            // The server enforces the shared vault password on every
+            // mutating endpoint, so we collect it up front and forward
+            // it via the X-Vault-Password header. The user gets a
+            // prompt (no yes/no confirmation): empty / cancelled → abort.
+            const password = promptVaultPassword(
+                "Enter the vault password to delete " + ids.length + " snippet(s):"
             );
-            if (!ok) return;
+            if (!password) return;
 
             els.deleteBtn.disabled = true;
             const originalText = els.deleteBtn.textContent;
@@ -551,6 +570,7 @@
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
+                        "X-Vault-Password": password,
                     },
                     body: JSON.stringify({ ids: ids }),
                 });
@@ -752,6 +772,13 @@
                     exit(true);
                     return;
                 }
+                // Collect the vault password up front. Per the spec, every
+                // save is gated (no session unlock), so we prompt each time.
+                const password = promptVaultPassword(
+                    "Enter the vault password to rename \"" + oldName
+                        + "\" -> \"" + newName + "\":"
+                );
+                if (!password) return;
                 tickBtn.disabled = true;
                 crossBtn.disabled = true;
                 input.disabled = true;
@@ -761,6 +788,7 @@
                         headers: {
                             "Content-Type": "application/json",
                             "Accept": "application/json",
+                            "X-Vault-Password": password,
                         },
                         body: JSON.stringify({ old: oldName, new: newName }),
                     });
@@ -793,11 +821,13 @@
          * refresh both the sidebar and the table.
          */
         async function onDeleteToolClicked(toolName) {
-            const ok = window.confirm(
-                "Delete ALL snippets under the tool \"" + toolName + "\"?\n\n"
-                    + "This cannot be undone."
+            // Replace yes/no with a password prompt. The server returns
+            // 401 if the password is wrong, so the user knows immediately.
+            const password = promptVaultPassword(
+                "Enter the vault password to delete ALL snippets under \""
+                    + toolName + "\":"
             );
-            if (!ok) return;
+            if (!password) return;
 
             try {
                 const res = await fetch(API_BULK_DELETE_TOOL, {
@@ -805,6 +835,7 @@
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
+                        "X-Vault-Password": password,
                     },
                     body: JSON.stringify({ tool: toolName }),
                 });

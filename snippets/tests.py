@@ -8,16 +8,72 @@ Two scenarios are covered per the spec:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+
 import pytest
+from django.conf import settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from .models import Snippet
 
+# Password used by every auth-gate test. Kept in one place so the
+# matching PBKDF2 hash in `vault_hash` stays in sync.
+TEST_PASSWORD = "test-vault-password"
+TEST_PASSWORD_WRONG = "definitely-not-the-password"
+
+
+def _hash_vault_password(plain: str) -> str:
+    """Mirror of ``vault.settings.check_vault_password``'s hashing step."""
+    return base64.b64encode(
+        hashlib.pbkdf2_hmac(
+            "sha256",
+            plain.encode("utf-8"),
+            settings.VAULT_PASSWORD_SALT,
+            settings.VAULT_PASSWORD_ITERATIONS,
+        )
+    ).decode("ascii")
+
 
 @pytest.fixture
-def client() -> APIClient:
+def client(monkeypatch: pytest.MonkeyPatch) -> APIClient:
+    """APIClient for the legacy test suite.
+
+    The legacy tests predate the password gate. We monkeypatch
+    ``settings.VAULT_PASSWORD_HASH`` to ``""`` here so the gate's
+    bypass branch fires and the tests can keep asserting on status
+    codes without ever sending an ``X-Vault-Password`` header.
+    Auth-gate tests use ``gated_client`` instead, which installs a
+    real hash and exercises the real code path.
+    """
+    monkeypatch.setattr(settings, "VAULT_PASSWORD_HASH", "")
     return APIClient()
+
+
+@pytest.fixture
+def gated_client(monkeypatch: pytest.MonkeyPatch) -> APIClient:
+    """APIClient wired with a real password hash so the auth class is engaged.
+
+    Auth-gate tests install a hash of ``TEST_PASSWORD`` and pass the matching
+    header via ``vault_headers`` (or deliberately omit it / send the wrong
+    value to assert 401).
+    """
+    monkeypatch.setattr(
+        settings, "VAULT_PASSWORD_HASH", _hash_vault_password(TEST_PASSWORD)
+    )
+    return APIClient()
+
+
+@pytest.fixture
+def vault_headers() -> dict[str, str]:
+    """Header kwargs accepted by APIClient methods (HTTP_X_VAULT_PASSWORD=...)."""
+    return {"HTTP_X_VAULT_PASSWORD": TEST_PASSWORD}
+
+
+@pytest.fixture
+def wrong_vault_headers() -> dict[str, str]:
+    return {"HTTP_X_VAULT_PASSWORD": TEST_PASSWORD_WRONG}
 
 
 @pytest.mark.django_db
@@ -438,3 +494,273 @@ def test_bulk_delete_tool_rejects_missing_tool(client: APIClient) -> None:
         format="json",
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# ---------------------------------------------------------------------------
+# Password-gate tests
+#
+# These tests exercise ``snippets.auth.VaultPasswordAuthentication`` end-to-end
+# by monkey-patching ``settings.VAULT_PASSWORD_HASH`` to a hash of a known
+# password, then asserting that mutating endpoints return 401 without the
+# header and 2xx with the right one.
+#
+# GET endpoints must stay open (public read view).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_create_without_password_returns_401(gated_client: APIClient) -> None:
+    payload = {
+        "title": "No Auth Header",
+        "code_body": "echo hi",
+        "language": "bash",
+        "tags": "auth",
+    }
+    response = gated_client.post("/api/snippets/", data=payload, format="json")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_create_with_wrong_password_returns_401(
+    gated_client: APIClient,
+    wrong_vault_headers: dict[str, str],
+) -> None:
+    payload = {
+        "title": "Wrong Password",
+        "code_body": "echo hi",
+        "language": "bash",
+        "tags": "auth",
+    }
+    response = gated_client.post(
+        "/api/snippets/", data=payload, format="json", **wrong_vault_headers
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_create_with_correct_password_returns_201(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    payload = {
+        "title": "Authorized Create",
+        "code_body": "echo hi",
+        "language": "bash",
+        "tags": "auth",
+    }
+    response = gated_client.post(
+        "/api/snippets/", data=payload, format="json", **vault_headers
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert Snippet.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_put_with_correct_password_updates_snippet(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    snippet = Snippet.objects.create(
+        title="Old Title",
+        code_body="echo old",
+        language="bash",
+        tags="auth",
+    )
+    response = gated_client.put(
+        f"/api/snippets/{snippet.id}/",
+        data={
+            "title": "New Title",
+            "code_body": "echo new",
+            "language": "bash",
+            "tags": "auth, updated",
+        },
+        format="json",
+        **vault_headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    snippet.refresh_from_db()
+    assert snippet.title == "New Title"
+    assert snippet.code_body == "echo new"
+
+
+@pytest.mark.django_db
+def test_put_without_password_returns_401(gated_client: APIClient) -> None:
+    snippet = Snippet.objects.create(
+        title="Stays Put",
+        code_body="x",
+        language="bash",
+        tags="",
+    )
+    response = gated_client.put(
+        f"/api/snippets/{snippet.id}/",
+        data={"title": "Hacked", "code_body": "y", "language": "bash", "tags": ""},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    snippet.refresh_from_db()
+    assert snippet.title == "Stays Put"
+
+
+@pytest.mark.django_db
+def test_delete_single_snippet_with_correct_password_returns_204(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    snippet = Snippet.objects.create(
+        title="To Be Deleted",
+        code_body="x",
+        language="bash",
+        tags="",
+    )
+    response = gated_client.delete(
+        f"/api/snippets/{snippet.id}/", **vault_headers
+    )
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    assert not Snippet.objects.filter(id=snippet.id).exists()
+
+
+@pytest.mark.django_db
+def test_delete_single_snippet_without_password_returns_401(
+    gated_client: APIClient,
+) -> None:
+    snippet = Snippet.objects.create(
+        title="Survives",
+        code_body="x",
+        language="bash",
+        tags="",
+    )
+    response = gated_client.delete(f"/api/snippets/{snippet.id}/")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.filter(id=snippet.id).exists()
+
+
+@pytest.mark.django_db
+def test_batch_delete_with_correct_password_deletes(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    a = Snippet.objects.create(title="A", code_body="a", language="bash", tags="")
+    b = Snippet.objects.create(title="B", code_body="b", language="bash", tags="")
+    response = gated_client.post(
+        "/api/snippets/batch-delete/",
+        data={"ids": [a.id, b.id]},
+        format="json",
+        **vault_headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert Snippet.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_batch_delete_without_password_returns_401(gated_client: APIClient) -> None:
+    a = Snippet.objects.create(title="A", code_body="a", language="bash", tags="")
+    response = gated_client.post(
+        "/api/snippets/batch-delete/",
+        data={"ids": [a.id]},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.filter(id=a.id).exists()
+
+
+@pytest.mark.django_db
+def test_bulk_rename_with_correct_password_renames(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    Snippet.objects.create(title="pod ps", code_body="x", language="docker", tags="")
+    Snippet.objects.create(title="pod images", code_body="y", language="docker", tags="")
+    response = gated_client.post(
+        "/api/snippets/bulk-rename-tool/",
+        data={"old": "docker", "new": "podman"},
+        format="json",
+        **vault_headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["updated"] == 2
+    assert Snippet.objects.filter(language="podman").count() == 2
+
+
+@pytest.mark.django_db
+def test_bulk_rename_without_password_returns_401(gated_client: APIClient) -> None:
+    Snippet.objects.create(title="stays", code_body="x", language="docker", tags="")
+    response = gated_client.post(
+        "/api/snippets/bulk-rename-tool/",
+        data={"old": "docker", "new": "podman"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.filter(language="docker").exists()
+
+
+@pytest.mark.django_db
+def test_bulk_delete_tool_with_correct_password_deletes(
+    gated_client: APIClient,
+    vault_headers: dict[str, str],
+) -> None:
+    Snippet.objects.create(title="kubectl get", code_body="x", language="kubectl", tags="")
+    Snippet.objects.create(title="kubectl apply", code_body="y", language="kubectl", tags="")
+    Snippet.objects.create(title="survivor", code_body="z", language="python", tags="")
+    response = gated_client.post(
+        "/api/snippets/bulk-delete-tool/",
+        data={"tool": "kubectl"},
+        format="json",
+        **vault_headers,
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["deleted"] == 2
+    assert Snippet.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_bulk_delete_tool_without_password_returns_401(
+    gated_client: APIClient,
+) -> None:
+    Snippet.objects.create(title="kubectl get", code_body="x", language="kubectl", tags="")
+    response = gated_client.post(
+        "/api/snippets/bulk-delete-tool/",
+        data={"tool": "kubectl"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert Snippet.objects.filter(language="kubectl").exists()
+
+
+@pytest.mark.django_db
+def test_get_list_does_not_require_password(gated_client: APIClient) -> None:
+    Snippet.objects.create(title="Public View", code_body="x", language="bash", tags="")
+    response = gated_client.get("/api/snippets/")
+    assert response.status_code == status.HTTP_200_OK
+    assert isinstance(response.data, list)
+    assert any(item["title"] == "Public View" for item in response.data)
+
+
+@pytest.mark.django_db
+def test_get_detail_does_not_require_password(gated_client: APIClient) -> None:
+    snippet = Snippet.objects.create(
+        title="Public Detail", code_body="x", language="bash", tags=""
+    )
+    response = gated_client.get(f"/api/snippets/{snippet.id}/")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["title"] == "Public Detail"
+
+
+@pytest.mark.django_db
+def test_bearer_fallback_header_works(
+    gated_client: APIClient,
+) -> None:
+    payload = {
+        "title": "Bearer Header",
+        "code_body": "x",
+        "language": "bash",
+        "tags": "",
+    }
+    response = gated_client.post(
+        "/api/snippets/",
+        data=payload,
+        format="json",
+        HTTP_AUTHORIZATION=f"Bearer {TEST_PASSWORD}",
+    )
+    assert response.status_code == status.HTTP_201_CREATED

@@ -8,8 +8,13 @@ hardcoded here.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import os
 from pathlib import Path
+
+from django.conf import settings as _django_settings
 
 try:
     from dotenv import load_dotenv
@@ -34,6 +39,52 @@ def _env_list(name: str, default: list[str]) -> list[str]:
     if not raw:
         return default
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+# --- Vault write-protection --------------------------------------------- #
+# PBKDF2-SHA256 of the shared mutation password. The plaintext never
+# touches the app: clients send the password back via the
+# `X-Vault-Password` header (see snippets/auth.py) and we only ever
+# compare the derived bytes against this hash.
+#
+# To mint a new hash from a fresh password locally, run:
+#   python -c "import hashlib,base64; \
+#     print(base64.b64encode(hashlib.pbkdf2_hmac('sha256', \
+#       b'YOUR_NEW_PASSWORD', b'vault-salt-v1', 200000)).decode())"
+# then paste the printed base64 into VAULT_PASSWORD_HASH below
+# (in .env / docker-compose).
+VAULT_PASSWORD_HASH = os.environ.get("VAULT_PASSWORD_HASH", "")
+VAULT_PASSWORD_SALT = b"vault-salt-v1"
+VAULT_PASSWORD_ITERATIONS = 200_000
+
+
+def check_vault_password(provided: str) -> bool:
+    """Constant-time check of `provided` against the configured hash.
+
+    Returns False (never raises) for every malformed input: an empty
+    hash, a malformed hash, a non-UTF-8 password, or any other
+    decoding error. Callers should treat False as "wrong password".
+
+    Reads through the lazy Django settings proxy
+    (``_django_settings.VAULT_PASSWORD_HASH``) so monkeypatching the
+    settings proxy in tests actually affects the comparison.
+    """
+    configured_hash = _django_settings.VAULT_PASSWORD_HASH
+    if not provided or not configured_hash:
+        return False
+    try:
+        expected = base64.b64decode(configured_hash, validate=True)
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256",
+            provided.encode("utf-8"),
+            VAULT_PASSWORD_SALT,
+            VAULT_PASSWORD_ITERATIONS,
+        )
+        return hmac.compare_digest(expected, candidate)
+    except (ValueError, TypeError, UnicodeEncodeError):
+        # Malformed stored hash or non-string provided — refuse
+        # gracefully rather than 500.
+        return False
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -133,5 +184,11 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
+    ],
+    # The header-based password gate. Safe methods (GET/HEAD/OPTIONS)
+    # are exempt inside the auth class itself; mutating handlers that
+    # opt in via permission_classes=[IsAuthenticated] are gated.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "snippets.auth.VaultPasswordAuthentication",
     ],
 }

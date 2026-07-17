@@ -22,7 +22,8 @@ from __future__ import annotations
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -33,6 +34,18 @@ from .serializers import SnippetSerializer
 
 class SnippetListCreateView(APIView):
     """Combined list/create endpoint for the Snippet resource."""
+
+    # The class-level default assumes a mutation (POST); the GET
+    # handler overrides this via `get_permissions()` to keep the
+    # listing endpoint open. Without this split, the public page
+    # would require the password on every reload.
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        # Per-request: GET is public, everything else is gated.
+        if self.request.method == "GET":
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get(self, request: Request) -> Response:
         query = request.query_params.get("q", "").strip()
@@ -52,11 +65,17 @@ class SnippetListCreateView(APIView):
 
 
 class SnippetDetailView(APIView):
-    """Retrieve / update a single Snippet by primary key."""
+    """Retrieve / update / delete a single Snippet by primary key."""
 
     def _get_object(self, pk: int) -> Snippet:
         # 404 with a helpful message if the row does not exist.
         return get_object_or_404(Snippet, pk=pk)
+
+    def get_permissions(self):
+        # Public read; gated write/delete.
+        if self.request.method == "GET":
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get(self, request: Request, pk: int) -> Response:
         snippet = self._get_object(pk)
@@ -79,8 +98,15 @@ class SnippetDetailView(APIView):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    def delete(self, request: Request, pk: int) -> Response:
+        """Delete a single snippet by id."""
+        snippet = self._get_object(pk)
+        snippet.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 @api_view(["POST", "DELETE"])
+@permission_classes([IsAuthenticated])
 def snippet_batch_delete(request: Request) -> Response:
     """
     Batch-delete snippets.
@@ -137,6 +163,7 @@ def _normalize_tool(raw: object) -> str:
 
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def bulk_rename_tool(request: Request) -> Response:
     """
     Rename a Tool/Stack across every snippet that uses it.
@@ -188,6 +215,7 @@ def bulk_rename_tool(request: Request) -> Response:
 
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def bulk_delete_tool(request: Request) -> Response:
     """
     Bulk-delete every snippet that uses the given Tool/Stack.

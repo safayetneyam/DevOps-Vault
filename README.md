@@ -113,6 +113,20 @@ Everything is read from environment variables — no secrets are hardcoded. See 
 | `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames Django will serve (e.g. `localhost,127.0.0.1,<your-domain>`) |
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | DB credentials, shared by `db` and `web` services |
 | `DB_HOST` / `DB_PORT` | Where `web` connects to Postgres (defaults to `db:5432`) |
+| `VAULT_PASSWORD_HASH` | PBKDF2-SHA256 hash (base64) of the shared write-protection password. Leave empty to disable the gate. Generate via `python -c "import base64, hashlib; print(base64.b64encode(hashlib.pbkdf2_hmac('sha256', b'YOUR_PASSWORD', b'vault-salt-v1', 200000)).decode())"` |
+
+### Write-protection (vault password)
+
+Every mutating endpoint — `POST/PUT/PATCH/DELETE /api/snippets/…` and the three bulk endpoints (`batch-delete`, `bulk-rename-tool`, `bulk-delete-tool`) — requires the shared vault password. Reads (`GET`) stay open.
+
+Clients must send the password in one of two ways:
+
+* `X-Vault-Password: <plaintext>` (preferred — sent by the front-end pages)
+* `Authorization: Bearer <plaintext>` (REST-friendly fallback)
+
+The server stores only the PBKDF2 hash; the plaintext lives in `.env` for human reference and is never logged. Comparison is constant-time.
+
+The front-end (`/create/`, `/edit/`, `/temp-admin/`) collects the password via `window.prompt` on every save — there is no session unlock, by design.
 
 ---
 

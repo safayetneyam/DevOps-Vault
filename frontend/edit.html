@@ -340,6 +340,22 @@
             els.status.className = kind || "";
         }
 
+        /**
+         * Ask the user for the shared vault password. Returns the
+         * trimmed password on success, or ``null`` if the user
+         * cancelled or left the field blank. Per the spec, every save
+         * re-prompts (no session unlock).
+         */
+        function promptVaultPassword(reason) {
+            const pw = window.prompt(
+                (reason || "Enter the vault password:") + "\n\n"
+                    + "Leave blank and press OK to cancel."
+            );
+            if (pw === null) return null;
+            const trimmed = pw.trim();
+            return trimmed || null;
+        }
+
         // Defense-in-depth: even though the model.save() normalizes,
         // we lowercase tags here so the wire payload is canonical.
         function normalizeTags(raw) {
@@ -431,6 +447,13 @@
                 return;
             }
 
+            // Vault write-protection: re-prompt for the shared
+            // password on every save (no session unlock).
+            const password = promptVaultPassword(
+                "Enter the vault password to save changes:"
+            );
+            if (!password) return;
+
             els.saveBtn.disabled = true;
             setStatus("Saving...", "");
             try {
@@ -439,6 +462,7 @@
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
+                        "X-Vault-Password": password,
                     },
                     body: JSON.stringify(payload),
                 });
