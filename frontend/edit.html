@@ -242,9 +242,110 @@
             padding: 0.5rem 0;
         }
         #form-card.hidden { display: none; }
+
+        /* --------------------------------------------------------------
+           Vault password modal. Replaces window.prompt() so the user
+           types into a <input type="password"> field that masks the
+           value as bullets — the vault password must never appear in
+           plain text on screen or in a recording.
+           -------------------------------------------------------------- */
+        #vault-pw-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.45);
+        }
+        #vault-pw-modal[hidden] { display: none; }
+        #vault-pw-modal .pw-dialog {
+            width: min(420px, calc(100vw - 32px));
+            background: var(--surface);
+            border: 1px solid var(--border-strong);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        }
+        #vault-pw-modal .pw-reason {
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.45;
+            margin: 0 0 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        #vault-pw-modal .pw-input {
+            width: 100%;
+            padding: 9px 11px;
+            font-size: 15px;
+            font-family: var(--mono);
+            color: var(--text);
+            background: var(--surface-alt);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            outline: none;
+        }
+        #vault-pw-modal .pw-input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+        }
+        #vault-pw-modal .pw-hint {
+            color: var(--text-soft);
+            font-size: 12px;
+            margin: 10px 0 0;
+        }
+        #vault-pw-modal .pw-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 16px;
+        }
+        #vault-pw-modal .pw-actions button {
+            font-size: 14px;
+            padding: 7px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--border-strong);
+            cursor: pointer;
+            background: var(--surface);
+            color: var(--text);
+        }
+        #vault-pw-modal .pw-actions .pw-ok {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        #vault-pw-modal .pw-actions .pw-ok:hover {
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
+        }
+        #vault-pw-modal .pw-error .pw-reason {
+            color: var(--danger);
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
+    <!-- Masked vault-password modal. Replaces window.prompt() so the
+         password is rendered as bullets instead of plaintext. See
+         promptVaultPassword() below for the lifecycle. -->
+    <div id="vault-pw-modal" role="dialog" aria-modal="true"
+         aria-labelledby="vault-pw-reason" hidden>
+        <div class="pw-dialog">
+            <p id="vault-pw-reason" class="pw-reason"></p>
+            <input id="vault-pw-input" class="pw-input"
+                   type="password" autocomplete="off"
+                   autocapitalize="off" autocorrect="off"
+                   spellcheck="false" />
+            <p class="pw-hint">Leave blank and press OK to cancel.</p>
+            <div class="pw-actions">
+                <button type="button" class="pw-cancel">Cancel</button>
+                <button type="button" class="pw-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
     <header>
         <h1>
             <a href="/" style="color: inherit; text-decoration: none;">
@@ -341,19 +442,99 @@
         }
 
         /**
-         * Ask the user for the shared vault password. Returns the
-         * trimmed password on success, or ``null`` if the user
-         * cancelled or left the field blank. Per the spec, every save
-         * re-prompts (no session unlock).
+         * Ask the user for the shared vault password via the masked
+         * modal in the DOM. Returns the trimmed password on success,
+         * or ``null`` if the user cancelled or left the field blank.
+         * Per the spec, every save re-prompts (no session unlock).
+         *
+         * The native ``window.prompt()`` displays the value in
+         * plaintext, which would leak the vault password to anyone
+         * watching the screen. The custom modal uses
+         * ``<input type="password">`` so the keystrokes render as
+         * bullets, and it accepts Esc / Enter so muscle memory still
+         * works.
+         *
+         * If the modal markup is missing for any reason (older cached
+         * HTML, partial DOM injection, etc.) we fall back to
+         * ``window.prompt`` so the page never becomes unable to write.
          */
         function promptVaultPassword(reason) {
-            const pw = window.prompt(
-                (reason || "Enter the vault password:") + "\n\n"
-                    + "Leave blank and press OK to cancel."
-            );
-            if (pw === null) return null;
-            const trimmed = pw.trim();
-            return trimmed || null;
+            const modal = document.getElementById("vault-pw-modal");
+            const input = document.getElementById("vault-pw-input");
+            const reasonEl = document.getElementById("vault-pw-reason");
+            const okBtn = modal && modal.querySelector(".pw-ok");
+            const cancelBtn = modal && modal.querySelector(".pw-cancel");
+
+            // Defensive fallback: if the modal markup is not in the
+            // DOM (e.g. an older cached page served without it), fall
+            // back to the old plaintext window.prompt so writes still
+            // work — they just won't be masked. Better than a silent
+            // broken page.
+            if (!modal || !input || !reasonEl || !okBtn || !cancelBtn) {
+                const pw = window.prompt(
+                    (reason || "Enter the vault password:") + "\n\n"
+                        + "Leave blank and press OK to cancel."
+                );
+                if (pw === null) return Promise.resolve(null);
+                return Promise.resolve(pw.trim() || null);
+            }
+
+            return new Promise((resolve) => {
+                let resolved = false;
+
+                function done(value) {
+                    if (resolved) return;
+                    resolved = true;
+                    modal.hidden = true;
+                    modal.classList.remove("pw-error");
+                    input.value = "";
+                    okBtn.removeEventListener("click", onOk);
+                    cancelBtn.removeEventListener("click", onCancel);
+                    input.removeEventListener("keydown", onKey);
+                    modal.removeEventListener("click", onBackdrop);
+                    document.removeEventListener("keydown", onEsc);
+                    resolve(value);
+                }
+
+                function onOk() { done(input.value.trim() || null); }
+                function onCancel() { done(null); }
+                function onBackdrop(e) {
+                    // Click outside the dialog (on the overlay itself)
+                    // cancels — mirrors how most native dialogs behave.
+                    if (e.target === modal) done(null);
+                }
+                function onKey(e) {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        done(input.value.trim() || null);
+                    }
+                }
+                function onEsc(e) {
+                    if (e.key === "Escape") {
+                        e.preventDefault();
+                        done(null);
+                    }
+                }
+
+                // Render this attempt's reason + reset any prior error
+                // colouring from a previous wrong-password prompt.
+                reasonEl.textContent =
+                    (reason || "Enter the vault password:") + "\n\n"
+                        + "Leave blank and press OK to cancel.";
+                modal.classList.remove("pw-error");
+
+                okBtn.addEventListener("click", onOk);
+                cancelBtn.addEventListener("click", onCancel);
+                input.addEventListener("keydown", onKey);
+                modal.addEventListener("click", onBackdrop);
+                document.addEventListener("keydown", onEsc);
+
+                modal.hidden = false;
+                // Defer focus until the dialog is visible so the
+                // cursor lands in the input and the soft keyboard (on
+                // touch devices) is ready.
+                setTimeout(() => { input.focus(); input.select(); }, 0);
+            });
         }
 
         /**
@@ -380,7 +561,7 @@
             onCancel,                                       // optional: called once when the user cancels the prompt, so the caller can wipe the red wrong-password text
         }) {
             for (let attempt = 1; ; attempt++) {
-                const password = promptVaultPassword(
+                const password = await promptVaultPassword(
                     attempt === 1
                         ? passwordReason
                         : (wrongReason + "\n\n" + passwordReason)
