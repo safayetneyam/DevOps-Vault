@@ -145,6 +145,28 @@
 
         @media (max-width: 600px) {
             .field-row { grid-template-columns: 1fr; }
+
+            /* Stack header into two centered rows.
+               Row 1: "DevOps Vault" title.
+               Row 2: ghost buttons (Back to Vault, Admin).
+               Tablet/desktop keep the original side-by-side layout. */
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.6rem;
+                padding: 0.85rem 1rem;
+            }
+
+            header h1 {
+                text-align: center;
+                font-size: 1.25rem;
+            }
+
+            .header-actions {
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 0.6rem;
+            }
         }
 
         .actions {

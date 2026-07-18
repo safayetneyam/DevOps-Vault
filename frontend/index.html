@@ -87,6 +87,40 @@
             main { grid-template-columns: 1fr; }
         }
 
+        /* Mobile (<= 600px): stack the header into three centered rows.
+           Row 1: "DevOps Vault" title (centered).
+           Row 2: snippet count (#status, centered, its own line).
+           Row 3: two ghost buttons (New Snippet, Admin), centered.
+           Tablet (601-900px) and desktop keep the original side-by-side
+           layout. #status, h1, and .header-actions are direct children
+           of <header>, so `order` reorders them within the column. */
+        @media (max-width: 600px) {
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.6rem;
+                padding: 0.85rem 1rem;
+            }
+
+            header h1 {
+                text-align: center;
+                font-size: 1.25rem;
+            }
+
+            #status {
+                text-align: center;
+                order: 2;
+                min-height: 1.1em;
+            }
+
+            .header-actions {
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 0.6rem;
+                order: 3;
+            }
+        }
+
         aside.sidebar,
         section.main {
             background: var(--surface);
@@ -475,8 +509,8 @@
                 DevOps <span>Vault</span>
             </a>
         </h1>
+        <span id="status" aria-live="polite"></span>
         <div class="header-actions">
-            <span id="status" aria-live="polite"></span>
             <a href="/create/" class="ghost" role="button" id="new-btn">+ New Snippet</a>
             <a href="/temp-admin/" class="ghost" role="button" id="admin-btn">Admin</a>
         </div>
