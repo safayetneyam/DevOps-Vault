@@ -611,7 +611,7 @@
                 <header id="detail-card-header">
                     <span class="title" id="detail-title"></span>
                     <span class="meta">
-                        <span class="chip" id="detail-lang"></span>
+                        <span class="chip" id="detail-tool"></span>
                         <button type="button" id="detail-toggle" class="card-btn" aria-expanded="true" aria-controls="detail-pre">Hide</button>
                         <button type="button" id="detail-copy" class="card-btn copy" aria-label="Copy code to clipboard">Copy</button>
                     </span>
@@ -639,7 +639,7 @@
             detailCard: document.getElementById("detail-card"),
             detailCode: document.getElementById("detail-code"),
             detailTitle: document.getElementById("detail-title"),
-            detailLang: document.getElementById("detail-lang"),
+            detailTool: document.getElementById("detail-tool"),
             detailPre: document.getElementById("detail-pre"),
             detailToggle: document.getElementById("detail-toggle"),
             detailCopy: document.getElementById("detail-copy"),
@@ -663,9 +663,9 @@
         // Helpers
         // --------------------------------------------------------------
 
-        /** Normalize a snippet's tool/language to a lowercase key. */
+        /** Normalize a snippet's tool to a lowercase key. */
         function toolKey(snippet) {
-            return (snippet.language || "").trim().toLowerCase() || "text";
+            return (snippet.tool || "").trim().toLowerCase() || "text";
         }
 
         /** Return the unique normalized tag list for a snippet. */
@@ -753,7 +753,7 @@
         }
 
         /**
-         * Compute the unique tags present in snippets whose `language`
+         * Compute the unique tags present in snippets whose `tool`
          * matches `tool`, and render them as nested checkboxes.
          * Returns the <ul> element to be appended under the tool row.
          */
@@ -898,10 +898,10 @@
 
                 const meta = document.createElement("span");
                 meta.className = "meta";
-                const langChip = document.createElement("span");
-                langChip.className = "lang";
-                langChip.textContent = s.language || "text";
-                meta.appendChild(langChip);
+                const toolChip = document.createElement("span");
+                toolChip.className = "lang";
+                toolChip.textContent = s.tool || "text";
+                meta.appendChild(toolChip);
                 tagKeys(s).forEach((tag) => {
                     const tagChip = document.createElement("span");
                     tagChip.className = "tag";
@@ -923,7 +923,7 @@
             // textContent preserves all whitespace, tabs, and newlines.
             els.detailCode.textContent = snippet.code_body;
             els.detailTitle.textContent = snippet.title;
-            els.detailLang.textContent = snippet.language || "text";
+            els.detailTool.textContent = snippet.tool || "text";
             // Reset the toggle/copy controls to their default visible state
             // every time a different snippet is opened.
             showCode();

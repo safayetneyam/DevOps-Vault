@@ -14,7 +14,7 @@ class SnippetSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "code_body",
-            "language",
+            "tool",
             "tags",
             "created_at",
         ]

@@ -28,7 +28,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Snippet
+from .models import Snippet, Tool
 from .serializers import SnippetSerializer
 
 
@@ -151,11 +151,30 @@ def snippet_batch_delete(request: Request) -> Response:
 
 
 def _normalize_tool(raw: object) -> str:
-    """Match the model's save() normalization: lowercase + stripped.
+    """Match the model's save() normalization: stripped only.
 
-    The Snippet model lowercases `language` on every save, so a tool
-    name we receive from the wire must be normalized the same way
-    before we query against the DB column.
+    The Snippet model preserves user casing on `tool` (it only strips
+    whitespace), so a tool name we receive from the wire must be
+    normalized the same way before we query against the DB column.
+    Lowercasing here would silently turn ``"Docker"`` into ``"docker"``
+    on the wire even though the registry keeps them distinct.
+
+    For registry-level lookups (uniqueness, bulk rename/delete),
+    use :func:`_tool_key` instead — that's the lowercased key used by
+    ``Tool.name_key`` and matches across casings.
+    """
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()
+
+
+def _tool_key(raw: object) -> str:
+    """Return the case-folded registry key for a tool name.
+
+    Used for matching against ``Tool.name_key`` so that ``"Jenkins"``
+    / ``"jenkins"`` / ``"jenKINs"`` all resolve to the same registry
+    row. Display string still comes from ``Tool.name`` (the user's
+    original casing).
     """
     if not isinstance(raw, str):
         return ""
@@ -172,8 +191,10 @@ def bulk_rename_tool(request: Request) -> Response:
 
     Returns ``{"updated": N, "old": "<normalized>", "new": "<normalized>"}``.
 
-    The rename runs through ``save()`` per row so the model can
-    re-normalize `language` (and tags) consistently with everywhere else.
+    Matching the ``old`` tool is case-insensitive: ``"Jenkins"`` will
+    hit snippets stored as ``"jenkins"`` and vice versa. The ``new``
+    tool name is also compared case-insensitively against every
+    registered Tool; a rename to an already-occupied key returns 409.
     """
     payload = request.data if isinstance(request.data, dict) else {}
 
@@ -190,7 +211,11 @@ def bulk_rename_tool(request: Request) -> Response:
             {"detail": "`new` is required and must be a non-empty string."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    if old_raw == new_raw:
+
+    old_key = _tool_key(old_raw)
+    new_key = _tool_key(new_raw)
+
+    if old_key == new_key:
         # Nothing to do; return a 200 with zero so the client doesn't
         # need to special-case this.
         return Response(
@@ -198,15 +223,42 @@ def bulk_rename_tool(request: Request) -> Response:
             status=status.HTTP_200_OK,
         )
 
-    # Match on the normalized column directly. Because the model always
-    # lowercases on save, we can use exact equality here.
-    qs = Snippet.objects.filter(language=old_raw)
+    # Block the rename if the target key already exists in the
+    # registry under a different display name. Compare via the
+    # lowercased ``name_key`` so "rename to JENKINS" with an existing
+    # "jenkins" row returns 409 rather than silently creating a
+    # duplicate.
+    if Tool.objects.filter(name_key=new_key).exists():
+        existing = Tool.objects.get(name_key=new_key)
+        return Response(
+            {
+                "detail": "A tool with that name already exists.",
+                "name": existing.name,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    # Match snippets by lowercased key so a "rename JENKINS -> shell"
+    # call still catches snippets stored under "jenkins" / "Jenkins".
+    qs = Snippet.objects.filter(tool__iexact=old_key)
     matched = list(qs)
     for snippet in matched:
         # Use __setattr__ + save() so the same normalization pipeline
-        # used elsewhere (lowercase language, dedupe tags) still runs.
-        snippet.language = new_raw
+        # used elsewhere (stripped tool, dedupe tags) still runs.
+        snippet.tool = new_raw
         snippet.save()
+
+    # Also update the Tool registry row's display name so the sidebar
+    # reflects the rename on the next ``list_tools`` fetch. Without
+    # this the registry would keep showing the OLD name even though
+    # every snippet underneath it has the NEW name, leaving the
+    # admin sidebar in a half-renamed state. Going through attribute
+    # assignment + ``save()`` ensures ``__setattr__`` keeps
+    # ``name_key`` in sync with the new ``name`` automatically.
+    registry = Tool.objects.filter(name_key=old_key).first()
+    if registry is not None and registry.name != new_raw:
+        registry.name = new_raw
+        registry.save()
 
     return Response(
         {"updated": len(matched), "old": old_raw, "new": new_raw},
@@ -233,8 +285,153 @@ def bulk_delete_tool(request: Request) -> Response:
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    deleted, _ = Snippet.objects.filter(language=tool_raw).delete()
+    # Case-insensitive match so "delete JENKINS" still nukes snippets
+    # stored under "jenkins" / "Jenkins".
+    deleted, _ = Snippet.objects.filter(tool__iexact=_tool_key(tool_raw)).delete()
     return Response(
         {"deleted": deleted, "tool": tool_raw},
+        status=status.HTTP_200_OK,
+    )
+
+
+# ---------------------------------------------------------------------
+# Create a brand-new Tool/Stack
+# ---------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_tool(request: Request) -> Response:
+    """
+    Register a brand-new Tools/Stack name in the vault.
+
+    Body: ``{"name": "helm"}``
+
+    Behavior:
+        - Empty / missing / non-string ``name`` -> 400.
+        - Strips the supplied name but **keeps its casing** on display
+          (``"Helm"`` round-trips as ``"Helm"``). Uniqueness is
+          enforced case-insensitively: a registry already containing
+          ``"Jenkins"`` will reject ``"jenkins"``, ``"JENKINS"`` etc.
+          via the lowercased ``Tool.name_key`` column. The frontend
+          does the same check BEFORE prompting the vault password so
+          the user never has to type it just to be told the name is
+          taken.
+        - If a Tool with that case-folded key already exists -> 409,
+          with the existing display name echoed back so the client can
+          show "A stack named \\"Jenkins\\" already exists".
+        - On success returns ``{"name": "<display name>", "created": true}``
+          with HTTP 201.
+
+    The new Tool row is independent of any Snippet — saving a snippet
+    under a previously-unused tool name still works without first
+    registering it; the registry is purely a UI convenience so the
+    Tools/Stack dropdown lists user-added names without waiting for
+    someone to save a snippet.
+    """
+    payload = request.data if isinstance(request.data, dict) else {}
+
+    name_raw = _normalize_tool(payload.get("name"))
+    if not name_raw:
+        return Response(
+            {"detail": "`name` is required and must be a non-empty string."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Case-insensitive uniqueness: a Tool whose ``name_key`` matches
+    # already owns this slot, regardless of display casing.
+    existing = Tool.objects.filter(name_key=_tool_key(name_raw)).first()
+    if existing is not None:
+        return Response(
+            {"detail": "A tool with this name already exists.",
+             "name": existing.name},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    tool = Tool(name=name_raw)
+    tool.save()
+    return Response(
+        {"name": tool.name, "created": True},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+# ---------------------------------------------------------------------
+# List registered Tools (used by the New/Edit snippet dropdowns AND
+# by the admin sidebar)
+# ---------------------------------------------------------------------
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def list_tools(request: Request) -> Response:
+    """Return the registry of Tools/Stacks the admin has declared.
+
+    Response is ``{"tools": ["bash", "docker", ...]}`` — sorted
+    alphabetically for deterministic dropdown ordering. Empty list
+    if the admin has not added any tools (the New/Edit pages fall
+    back to their built-in defaults in that case).
+
+    This endpoint is intentionally public (no auth) because the Tools
+    dropdown is rendered on the New/Edit pages, which never require a
+    password for read-only operations.
+    """
+    names = list(
+        Tool.objects.values_list("name", flat=True).order_by("name")
+    )
+    return Response({"tools": names}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------
+# Delete a registered Tool/Stack
+# ---------------------------------------------------------------------
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_tool(request: Request, name: str) -> Response:
+    """Remove a Tools/Stack from the registry AND delete every snippet
+    under it.
+
+    URL: ``DELETE /api/snippets/tools/<name>/``
+
+    Behavior:
+        - Normalizes ``<name>`` the same way the bulk endpoints do.
+        - If no Tool row exists with that name -> 404.
+        - On success, removes every Snippet whose ``tool`` matches
+          the normalized name and deletes the Tool row itself. Returns
+          ``{"deleted_snippets": N, "name": "<normalized>"}``.
+
+    After this call, the tool name disappears from every dropdown
+    (Create / Edit / Admin sidebar) because those pages all read from
+    the same registry table.
+    """
+    name_norm = _normalize_tool(name)
+    if not name_norm:
+        return Response(
+            {"detail": "`name` is required and must be a non-empty string."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Match by lowercased key so "DELETE /tools/JENKINS/" removes the
+    # row stored under "jenkins" / "Jenkins".
+    target = Tool.objects.filter(name_key=_tool_key(name_norm)).first()
+    if target is None:
+        return Response(
+            {"detail": "No tool with that name exists.",
+             "name": name_norm},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Cascade: drop every snippet that uses this tool, then drop
+    # the registry row. We do snippets first so the unique-name index
+    # doesn't briefly see the row without its dependents.
+    deleted_snippets, _ = (
+        Snippet.objects.filter(tool__iexact=target.name_key).delete()
+    )
+    Tool.objects.filter(pk=target.pk).delete()
+
+    return Response(
+        {"deleted_snippets": deleted_snippets, "name": target.name},
         status=status.HTTP_200_OK,
     )

@@ -7,6 +7,9 @@ from .views import (
     SnippetListCreateView,
     bulk_delete_tool,
     bulk_rename_tool,
+    create_tool,
+    delete_tool,
+    list_tools,
     snippet_batch_delete,
 )
 
@@ -20,4 +23,8 @@ urlpatterns = [
     # Bulk operations on a whole Tool/Stack.
     path("bulk-rename-tool/", bulk_rename_tool, name="bulk-rename-tool"),
     path("bulk-delete-tool/", bulk_delete_tool, name="bulk-delete-tool"),
+    # Tool/Stack registry: list + create + delete.
+    path("tools/", list_tools, name="list-tools"),
+    path("tools/create/", create_tool, name="create-tool"),
+    path("tools/<str:name>/", delete_tool, name="delete-tool"),
 ]

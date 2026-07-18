@@ -274,26 +274,15 @@
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label for="f-language">Tools / Stack</label>
-                        <select id="f-language" name="language" required>
-                            <option value="" disabled>Select a tool or stack&hellip;</option>
-                            <option value="kubernetes">kubernetes</option>
-                            <option value="docker">docker</option>
-                            <option value="linux">linux</option>
-                            <option value="python">python</option>
-                            <option value="django">django</option>
-                            <option value="postgresql">postgresql</option>
-                            <option value="github-actions">github-actions</option>
-                            <option value="bash">bash</option>
-                            <option value="jenkins">jenkins</option>
-                            <option value="groovy">groovy</option>
-                            <option value="terraform">terraform</option>
-                            <option value="ansible">ansible</option>
-                            <option value="aws">aws</option>
-                            <option value="prometheus">prometheus</option>
-                            <option value="grafana">grafana</option>
-                        </select>
-                    </div>
+                    <label for="f-tool">Tools / Stack</label>
+                    <!-- <select> populated at load time from the Tool
+                         registry (GET /api/snippets/tools/). Falls back
+                         to a built-in default list if the registry is
+                         empty or unreachable. -->
+                    <select id="f-tool" name="tool" required>
+                        <option value="" disabled>Select a tool or stack&hellip;</option>
+                    </select>
+                </div>
                     <div class="field">
                         <label for="f-tags">Tags (comma-separated)</label>
                         <input type="text" id="f-tags" name="tags"
@@ -322,6 +311,17 @@
         const snippetId = parseInt(pathParts[pathParts.length - 1], 10);
 
         const API_DETAIL = "/api/snippets/" + snippetId + "/";
+        // Public registry endpoint that lists every Tool/Stack known to
+        // the system, including ones with zero snippets. The dropdown
+        // below is populated from this list (with a built-in fallback
+        // when the request fails or returns nothing).
+        const API_TOOLS = "/api/snippets/tools/";
+
+        // Shown inside the tool/stack <select> when the registry is
+        // empty (no stacks have been added by the admin yet) so the
+        // user understands why the dropdown is not populated.
+        const EMPTY_REGISTRY_MESSAGE =
+            "No Stack or Tool Exists to Choose";
 
         const els = {
             loading: document.getElementById("loading"),
@@ -329,7 +329,7 @@
             heading: document.getElementById("form-heading"),
             title: document.getElementById("f-title"),
             code: document.getElementById("f-code"),
-            language: document.getElementById("f-language"),
+            tool: document.getElementById("f-tool"),
             tags: document.getElementById("f-tags"),
             saveBtn: document.getElementById("save-btn"),
             status: document.getElementById("status"),
@@ -448,6 +448,71 @@
         }
 
         // --------------------------------------------------------------
+        // Populate the Tools/Stack <select> from the registry. The
+        // registry is the single source of truth — any Tool the admin
+        // added via the sidebar appears here, and any Tool the admin
+        // deleted disappears from here too. If the API returns an
+        // empty list OR fails, the dropdown shows a single disabled
+        // "No Stack or Tool Exists to Choose" entry instead of falling
+        // back to a built-in default list, so the user always sees
+        // exactly what's been registered. The snippet's current
+        // value (if any) is re-selected by loadSnippet().
+        async function loadToolOptions() {
+            let names = [];
+            let apiReached = false;
+            try {
+                const res = await fetch(API_TOOLS, {
+                    headers: { "Accept": "application/json" },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data.tools)) {
+                        names = data.tools;
+                    }
+                    apiReached = true;
+                }
+            } catch (err) {
+                // Network / parse failure -> empty-state UI below.
+            }
+
+            // Rebuild the <select> from scratch, keeping the original
+            // placeholder as the first child so the markup stays
+            // valid; we replace its label dynamically to match the
+            // current registry state.
+            const select = els.tool;
+            const placeholder = select.options[0];
+            select.innerHTML = "";
+            select.appendChild(placeholder);
+
+            if (!names.length) {
+                // Empty registry (or API unreachable): turn the
+                // placeholder into the empty-state message, leave it
+                // disabled so the user can't submit an empty form,
+                // and disable the <select> entirely so it reads as
+                // read-only feedback rather than an active dropdown.
+                placeholder.textContent =
+                    apiReached
+                        ? EMPTY_REGISTRY_MESSAGE
+                        : "Unable to load tools. Retry later.";
+                placeholder.disabled = true;
+                placeholder.selected = true;
+                select.disabled = true;
+                return;
+            }
+
+            select.disabled = false;
+            placeholder.textContent = "Select a tool or stack\u2026";
+            placeholder.disabled = true;
+            placeholder.selected = true;
+
+            names.forEach((n) => {
+                const opt = document.createElement("option");
+                opt.value = n;
+                opt.textContent = n;
+                select.appendChild(opt);
+            });
+        }
+
         // Fetch the snippet and pre-fill the form.
         // --------------------------------------------------------------
         async function loadSnippet() {
@@ -465,25 +530,25 @@
                 }
                 const snippet = await res.json();
 
-                // Pre-fill every field. The model normalizes language to
+                // Pre-fill every field. The model normalizes tool to
                 // lowercase, so the API value is always lowercase too.
                 els.title.value = snippet.title || "";
                 els.code.value = snippet.code_body || "";
 
                 // Match the option whose value equals the snippet's
-                // language; if none matches (custom value), append a new
+                // tool; if none matches (custom value), append a new
                 // option so the user can still see + edit it.
-                const lang = (snippet.language || "").toLowerCase();
+                const tool = (snippet.tool || "").toLowerCase();
                 let matched = false;
-                for (const opt of els.language.options) {
-                    if (opt.value === lang) { opt.selected = true; matched = true; }
+                for (const opt of els.tool.options) {
+                    if (opt.value === tool) { opt.selected = true; matched = true; }
                 }
-                if (!matched && lang) {
+                if (!matched && tool) {
                     const opt = document.createElement("option");
-                    opt.value = lang;
-                    opt.textContent = lang;
+                    opt.value = tool;
+                    opt.textContent = tool;
                     opt.selected = true;
-                    els.language.appendChild(opt);
+                    els.tool.appendChild(opt);
                 }
 
                 els.tags.value = snippet.tags || "";
@@ -506,14 +571,14 @@
             const payload = {
                 title: els.title.value.trim(),
                 code_body: els.code.value,
-                language: els.language.value.trim().toLowerCase(),
+                tool: els.tool.value.trim(),
                 tags: normalizeTags(els.tags.value),
             };
             if (!payload.title || !payload.code_body) {
                 setStatus("Title and Code Body are required.", "err");
                 return;
             }
-            if (!payload.language) {
+            if (!payload.tool) {
                 setStatus("Please choose a Tools / Stack value.", "err");
                 return;
             }
@@ -558,6 +623,13 @@
             }
         });
 
+        // Populate the Tools/Stack <select> from the registry before
+        // loadSnippet() runs so the matching loop in loadSnippet can
+        // find the current value. loadSnippet still appends an option
+        // on miss (handles snippets saved against tools that were
+        // later deleted from the registry), so the order doesn't have
+        // to be strict — both fetches just need to finish.
+        loadToolOptions();
         loadSnippet();
     })();
     </script>

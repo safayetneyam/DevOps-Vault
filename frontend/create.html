@@ -290,28 +290,18 @@
                 </div>
                 <div class="field-row">
                     <div class="field">
-                        <label for="f-language">Tools / Stack</label>
-                        <!-- <select> (not <input>): restricts to the 15
-                             hardcoded DevOps tools defined below. -->
-                        <select id="f-language" name="language" required>
-                            <option value="" disabled>Select a tool or stack&hellip;</option>
-                            <option value="kubernetes" selected>kubernetes</option>
-                            <option value="docker">docker</option>
-                            <option value="linux">linux</option>
-                            <option value="python">python</option>
-                            <option value="django">django</option>
-                            <option value="postgresql">postgresql</option>
-                            <option value="github-actions">github-actions</option>
-                            <option value="bash">bash</option>
-                            <option value="jenkins">jenkins</option>
-                            <option value="groovy">groovy</option>
-                            <option value="terraform">terraform</option>
-                            <option value="ansible">ansible</option>
-                            <option value="aws">aws</option>
-                            <option value="prometheus">prometheus</option>
-                            <option value="grafana">grafana</option>
-                        </select>
-                    </div>
+                    <label for="f-tool">Tools / Stack</label>
+                    <!-- <select> populated at load time from the Tool
+                         registry (GET /api/snippets/tools/). If the
+                         admin has added or deleted Tools since this
+                         page was cached, those changes flow through
+                         to the dropdown automatically. Falls back
+                         to a built-in list if the API is empty or
+                         unreachable so the form is never blank. -->
+                    <select id="f-tool" name="tool" required>
+                        <option value="" disabled>Select a tool or stack&hellip;</option>
+                    </select>
+                </div>
                     <div class="field">
                         <label for="f-tags">Tags (comma-separated)</label>
                         <!-- <input list="tag-suggestions"> + <datalist>
@@ -338,11 +328,19 @@
         "use strict";
 
         const API = "/api/snippets/";
+        const API_TOOLS = "/api/snippets/tools/";
         const status = document.getElementById("status");
         const form = document.getElementById("create-form");
         const btn = document.getElementById("create-btn");
         const tagInput = document.getElementById("f-tags");
         const tagSuggestions = document.getElementById("tag-suggestions");
+        const toolSelect = document.getElementById("f-tool");
+
+        // Shown inside the tool/stack <select> when the registry is
+        // empty (no stacks have been added by the admin yet) so the
+        // user understands why the dropdown is not populated.
+        const EMPTY_REGISTRY_MESSAGE =
+            "No Stack or Tool Exists to Choose";
 
         function setStatus(msg, kind) {
             status.textContent = msg || "";
@@ -492,14 +490,14 @@
             const payload = {
                 title: document.getElementById("f-title").value.trim(),
                 code_body: document.getElementById("f-code").value,
-                language: document.getElementById("f-language").value.trim().toLowerCase(),
+                tool: document.getElementById("f-tool").value.trim(),
                 tags: normalizeTags(tagInput.value),
             };
             if (!payload.title || !payload.code_body) {
                 setStatus("Title and Code Body are required.", "err");
                 return;
             }
-            if (!payload.language) {
+            if (!payload.tool) {
                 setStatus("Please choose a Tools / Stack value.", "err");
                 return;
             }
@@ -544,6 +542,72 @@
 
         // Populate the auto-suggest list on page load.
         loadTagSuggestions();
+
+        /**
+         * Fetch the registered Tools/Stacks from the server and
+         * rebuild the <select id="f-tool"> option list. The
+         * registry is the single source of truth — any Tool the admin
+         * added via the sidebar appears here, and any Tool the admin
+         * deleted disappears from here too. If the API returns an
+         * empty list OR fails, the dropdown shows a single
+         * disabled "No Stack or Tool Exists to Choose" entry instead
+         * of falling back to a built-in default list, so the user
+         * always sees exactly what's been registered.
+         */
+        async function loadToolOptions() {
+            let names = [];
+            let apiReached = false;
+            try {
+                const res = await fetch(API_TOOLS, {
+                    headers: { "Accept": "application/json" },
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    names = Array.isArray(data && data.tools) ? data.tools : [];
+                    apiReached = true;
+                }
+            } catch (_) {
+                /* network failure -> empty-state UI */
+            }
+
+            // Rebuild the <select> while preserving the original
+            // placeholder as the first child so the select stays
+            // valid in markup; we replace its label dynamically to
+            // match the current registry state.
+            const placeholder = toolSelect.firstElementChild;
+            toolSelect.innerHTML = "";
+            if (placeholder) toolSelect.appendChild(placeholder);
+
+            if (!names.length) {
+                // Empty registry (or API unreachable): turn the
+                // placeholder into the empty-state message, leave it
+                // disabled so the user can't submit an empty form,
+                // and disable the <select> entirely so it reads as
+                // read-only feedback rather than an active dropdown.
+                placeholder.textContent =
+                    apiReached
+                        ? EMPTY_REGISTRY_MESSAGE
+                        : "Unable to load tools. Retry later.";
+                placeholder.disabled = true;
+                placeholder.selected = true;
+                toolSelect.disabled = true;
+                return;
+            }
+
+            toolSelect.disabled = false;
+            placeholder.textContent = "Select a tool or stack\u2026";
+            placeholder.disabled = true;
+            placeholder.selected = true;
+
+            for (const name of names) {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.textContent = name;
+                toolSelect.appendChild(opt);
+            }
+        }
+
+        loadToolOptions();
     })();
     </script>
 </body>
