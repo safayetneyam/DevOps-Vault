@@ -406,17 +406,17 @@
 
     <main>
         <div class="admin-grid">
-            <!-- 1/4: Manage Tools/Stacks sidebar -->
-            <aside id="tools-sidebar" aria-label="Manage tools and stacks">
-                <h2>Manage Tools/Stacks</h2>
+            <!-- 1/4: Manage Tools sidebar -->
+            <aside id="tools-sidebar" aria-label="Manage tools">
+                <h2>Manage Tools</h2>
                 <p class="sidebar-hint">Each row is a unique tool. Edit to rename across all snippets, or delete to remove the entire group.</p>
                 <ul id="tools-list">
-                    <li class="tool-row add-row" id="add-tool-row" aria-label="Add a new tools or stack">
-                        <span class="tool-name add-label">+ Add Stack</span>
+                    <li class="tool-row add-row" id="add-tool-row" aria-label="Add a new tool">
+                        <span class="tool-name add-label">+ Add Tool</span>
                         <span class="tool-actions">
                             <button type="button" class="icon-btn add-btn"
-                                    title="Add a new tools or stack"
-                                    aria-label="Add a new tools or stack">+</button>
+                                    title="Add a new tool"
+                                    aria-label="Add a new tool">+</button>
                         </span>
                     </li>
                     <li class="sidebar-empty">Loading tools...</li>
@@ -846,15 +846,15 @@
                 // the row keeps its original markup.
                 const newLabel = document.createElement("span");
                 newLabel.className = "tool-name add-label";
-                newLabel.textContent = "+ Add Stack";
+                newLabel.textContent = "+ Add Tool";
                 const newActions = document.createElement("span");
                 newActions.className = "tool-actions";
                 const newBtn = document.createElement("button");
                 newBtn.type = "button";
                 newBtn.className = "icon-btn add-btn";
-                newBtn.title = "Add a new tools or stack";
+                newBtn.title = "Add a new tool";
                 newBtn.setAttribute(
-                    "aria-label", "Add a new tools or stack"
+                    "aria-label", "Add a new tool"
                 );
                 newBtn.textContent = "+";
                 newActions.appendChild(newBtn);
@@ -877,7 +877,7 @@
                 // and show the empty hint below it.
                 const li = document.createElement("li");
                 li.className = "sidebar-empty";
-                li.textContent = "No tools yet. Click + Add Stack above to create one.";
+                li.textContent = "No tools yet. Click + Add Tool above to create one.";
                 els.toolsList.appendChild(li);
                 return;
             }
@@ -985,7 +985,7 @@
             input.type = "text";
             input.className = "tool-add-input";
             input.placeholder = "new-tool";
-            input.setAttribute("aria-label", "New tools or stack name");
+            input.setAttribute("aria-label", "New tool name");
 
             const tickBtn = document.createElement("button");
             tickBtn.type = "button";
@@ -1040,7 +1040,7 @@
             tickBtn.addEventListener("click", async () => {
                 const newName = input.value.trim();
                 if (!newName) {
-                    setStatus("New stack name cannot be empty.", "err");
+                    setStatus("New tool name cannot be empty.", "err");
                     input.focus();
                     return;
                 }
@@ -1056,7 +1056,7 @@
                 );
                 if (clash) {
                     setStatus(
-                        "A stack named \"" + clash
+                        "A tool named \"" + clash
                             + "\" already exists. "
                             + "\"" + newName + "\" is the same name.",
                         "err"
@@ -1074,7 +1074,7 @@
                         method: "POST",
                         body: { name: newName },
                         passwordReason:
-                            "Enter the vault password to create new stack \""
+                            "Enter the vault password to create new tool \""
                             + newName + "\":",
                         onWrong: (msg) => setStatus(msg, "err"),
                         // Wipe the red "Wrong vault password" text
@@ -1097,7 +1097,7 @@
                         lastTools.push(body.name);
                     }
                     setStatus(
-                        "Created new stack \"" + body.name + "\".", "ok"
+                        "Created new tool \"" + body.name + "\".", "ok"
                     );
                     // Restore the static "+ Add Stack" row (drop the
                     // input + Tick/Cross controls, unhide the label
@@ -1112,7 +1112,7 @@
                     bindAddRow();
                 } catch (err) {
                     setStatus(
-                        "Create stack failed: " + err.message, "err"
+                        "Create tool failed: " + err.message, "err"
                     );
                     // Fully roll the row back to its static
                     // "+ Add Stack" state (drop the input + Tick/
@@ -1286,7 +1286,7 @@
                     method: "DELETE",
                     body: {},
                     passwordReason:
-                        "Enter the vault password to delete stack \""
+                        "Enter the vault password to delete tool \""
                         + toolName + "\" and all its snippets:",
                     onWrong: (msg) => setStatus(msg, "err"),
                     // Wipe the red "Wrong vault password" text when
@@ -1295,7 +1295,7 @@
                 });
                 if (!body) return;                  // user cancelled
                 setStatus(
-                    "Deleted stack \"" + toolName + "\" and "
+                    "Deleted tool \"" + toolName + "\" and "
                         + (body.deleted_snippets || 0) + " snippet(s).",
                     "ok"
                 );

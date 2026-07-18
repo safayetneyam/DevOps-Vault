@@ -285,6 +285,118 @@ def test_put_replaces_snippet_in_full(client: APIClient) -> None:
     assert s.tags == "k8s, fresh"
 
 
+# ---------------------------------------------------------------------
+# Snippet.tool alignment with the Tool registry
+# ---------------------------------------------------------------------
+#
+# When a Tool row exists whose `name_key` matches the case-folded
+# `tool` string the client sent, the snippet must be persisted under
+# the registry's DISPLAY casing — not whatever casing the client
+# happened to type. Otherwise the index sidebar would show "Jenkins"
+# (registry) while the snippet underneath is stored as "jenkins" (or
+# vice versa), and a later rename would lose track of one of the two.
+# These tests pin that contract from both create and update paths.
+
+
+@pytest.mark.django_db
+def test_create_snippet_aligns_tool_to_registry_case(
+    client: APIClient,
+) -> None:
+    """POST /api/snippets/ with a registry-registered tool
+    collapses the snippet's stored casing to the registry's row."""
+    Tool.objects.create(name="Kahini")
+
+    response = client.post(
+        "/api/snippets/",
+        data={
+            "title": "story",
+            "code_body": "echo hi",
+            "tool": "kahini",  # any casing — collapses to "Kahini"
+            "tags": "",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["tool"] == "Kahini"
+
+    saved = Snippet.objects.get()
+    assert saved.tool == "Kahini"
+
+
+@pytest.mark.django_db
+def test_create_snippet_preserves_case_for_unregistered_tool(
+    client: APIClient,
+) -> None:
+    """A tool name with no matching registry row is stored verbatim
+    (we don't auto-register)."""
+    assert Tool.objects.count() == 0
+
+    response = client.post(
+        "/api/snippets/",
+        data={
+            "title": "helm chart",
+            "code_body": "helm install foo",
+            "tool": "Helm",  # not yet in the registry
+            "tags": "",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["tool"] == "Helm"
+
+    # Registry is still empty — we did NOT auto-register.
+    assert Tool.objects.count() == 0
+    saved = Snippet.objects.get()
+    assert saved.tool == "Helm"
+
+
+@pytest.mark.django_db
+def test_put_updates_align_tool_to_registry_case(
+    client: APIClient,
+) -> None:
+    """PUT with a differently-cased registry name flips the stored
+    tool to the registry's display casing."""
+    Tool.objects.create(name="Jenkins")
+    s = Snippet.objects.create(
+        title="t", code_body="c", tool="bash", tags=""
+    )
+
+    response = client.put(
+        f"/api/snippets/{s.id}/",
+        data={
+            "title": "t",
+            "code_body": "c",
+            "tool": "JENKINS",
+            "tags": "",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_200_OK
+    s.refresh_from_db()
+    assert s.tool == "Jenkins"
+
+
+@pytest.mark.django_db
+def test_snippet_save_alignment_skips_when_no_registry_row(
+    client: APIClient,
+) -> None:
+    """Saving a snippet with a brand-new tool leaves the casing
+    intact when no Tool row exists for it (no fallback to
+    lowercasing)."""
+    response = client.post(
+        "/api/snippets/",
+        data={
+            "title": "x",
+            "code_body": "y",
+            "tool": "MyTool",
+            "tags": "",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    assert Snippet.objects.get().tool == "MyTool"
+
+
 @pytest.mark.django_db
 def test_patch_partial_update_only_touches_supplied_fields(
     client: APIClient,

@@ -157,11 +157,32 @@ class Snippet(models.Model):
         ``tool`` is only stripped — the user-supplied casing is kept
         so a Tool registered as ``"Docker"`` round-trips as ``"Docker"``.
         Tags remain lowercase-deduped as before.
+
+        Casing alignment
+        ----------------
+        If a Tool row exists whose ``name_key`` matches the
+        case-folded ``tool``, we rewrite ``self.tool`` to that
+        row's *display casing* (``Tool.name``). That collapses
+        ``"kahini"`` to ``"Kahini"`` so the snippet, the registry,
+        and the index sidebar all agree on the casing — and
+        prevents future drift where one snippet ends up with a
+        lowercased name while the registry keeps the original.
+        A tool name with no matching registry row is preserved
+        verbatim; we deliberately do NOT auto-register here.
         """
         # `tool` may be defaulted by the DB to "bash" before this
         # runs on a fresh object; .strip() is a no-op on that default.
         norm_tool = self._norm_tool(self.tool)
-        self.tool = norm_tool or "bash"
+        norm_tool = norm_tool or "bash"
+        # Look up the registry row by case-folded key. This stays
+        # inside the same transaction's consistency window so a tool
+        # added mid-save isn't half-applied. The default fallback
+        # ("bash") below only triggers for an unknown registry row.
+        registry = Tool.objects.filter(name_key=norm_tool.lower()).first()
+        if registry is not None:
+            self.tool = registry.name
+        else:
+            self.tool = norm_tool
         self.tags = self._norm_tags(self.tags)
 
     def save(self, *args, **kwargs):

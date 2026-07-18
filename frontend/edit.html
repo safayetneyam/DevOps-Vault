@@ -274,13 +274,13 @@
                 </div>
                 <div class="field-row">
                     <div class="field">
-                    <label for="f-tool">Tools / Stack</label>
+                    <label for="f-tool">Tool</label>
                     <!-- <select> populated at load time from the Tool
                          registry (GET /api/snippets/tools/). Falls back
                          to a built-in default list if the registry is
                          empty or unreachable. -->
                     <select id="f-tool" name="tool" required>
-                        <option value="" disabled>Select a tool or stack&hellip;</option>
+                        <option value="" disabled>Select a tool&hellip;</option>
                     </select>
                 </div>
                     <div class="field">
@@ -321,7 +321,7 @@
         // empty (no stacks have been added by the admin yet) so the
         // user understands why the dropdown is not populated.
         const EMPTY_REGISTRY_MESSAGE =
-            "No Stack or Tool Exists to Choose";
+            "No Tool Exists to Choose";
 
         const els = {
             loading: document.getElementById("loading"),
@@ -501,7 +501,7 @@
             }
 
             select.disabled = false;
-            placeholder.textContent = "Select a tool or stack\u2026";
+            placeholder.textContent = "Select a tool\u2026";
             placeholder.disabled = true;
             placeholder.selected = true;
 
@@ -530,25 +530,47 @@
                 }
                 const snippet = await res.json();
 
-                // Pre-fill every field. The model normalizes tool to
-                // lowercase, so the API value is always lowercase too.
+                // Pre-fill every field. Tool names preserve user-supplied
+                // casing on both the registry and the snippet, so the
+                // API value comes back verbatim.
                 els.title.value = snippet.title || "";
                 els.code.value = snippet.code_body || "";
 
                 // Match the option whose value equals the snippet's
-                // tool; if none matches (custom value), append a new
-                // option so the user can still see + edit it.
-                const tool = (snippet.tool || "").toLowerCase();
+                // tool. Comparison is case-insensitive so a snippet
+                // stored as "jenkins" still resolves to the "Jenkins"
+                // registry option (and vice versa). If none matches
+                // (the tool was deleted from the registry, etc.), we
+                // append a new option so the user can still see +
+                // edit it — but only after checking there's no
+                // case-fold duplicate already present.
+                const tool = (snippet.tool || "").trim();
                 let matched = false;
                 for (const opt of els.tool.options) {
-                    if (opt.value === tool) { opt.selected = true; matched = true; }
+                    if (opt.value.toLowerCase() === tool.toLowerCase()) {
+                        opt.selected = true;
+                        matched = true;
+                    }
                 }
                 if (!matched && tool) {
-                    const opt = document.createElement("option");
-                    opt.value = tool;
-                    opt.textContent = tool;
-                    opt.selected = true;
-                    els.tool.appendChild(opt);
+                    // Don't append if any existing option is already
+                    // the same tool under different casing — that
+                    // would just duplicate the dropdown row.
+                    let already = false;
+                    for (const opt of els.tool.options) {
+                        if (opt.value.toLowerCase() === tool.toLowerCase()) {
+                            opt.selected = true;
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (!already) {
+                        const opt = document.createElement("option");
+                        opt.value = tool;
+                        opt.textContent = tool;
+                        opt.selected = true;
+                        els.tool.appendChild(opt);
+                    }
                 }
 
                 els.tags.value = snippet.tags || "";
@@ -579,7 +601,7 @@
                 return;
             }
             if (!payload.tool) {
-                setStatus("Please choose a Tools / Stack value.", "err");
+                setStatus("Please choose a tool value.", "err");
                 return;
             }
 

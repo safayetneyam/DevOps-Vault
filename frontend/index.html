@@ -578,10 +578,10 @@
     <main>
         <aside class="sidebar" aria-label="Filter sidebar">
             <div class="sidebar-header">
-                <h2>Filter by Tools / Stack</h2>
+                <h2>Filter by Tool</h2>
                 <button type="button" id="filter-clear" hidden>Clear filters</button>
             </div>
-            <ul id="filter-tools" aria-label="Filter results by tool or stack"></ul>
+            <ul id="filter-tools" aria-label="Filter results by tool"></ul>
         </aside>
 
         <section class="main" aria-label="Search and results">
@@ -663,9 +663,18 @@
         // Helpers
         // --------------------------------------------------------------
 
-        /** Normalize a snippet's tool to a lowercase key. */
+        /**
+         * Return the snippet's tool name as the user supplied it
+         * (trimmed). We deliberately do NOT lowercase here — the
+         * sidebar must display the registry's original casing, and
+         * both `Snippet.tool` and `Tool.name` already preserve
+         * user-supplied casing on the wire. Filtering comparisons
+         * against `activeTool` are exact-string matches, so this
+         * also keeps the radio `value` and the active selection
+         * consistent with the label shown to the user.
+         */
         function toolKey(snippet) {
-            return (snippet.tool || "").trim().toLowerCase() || "text";
+            return (snippet.tool || "").trim() || "text";
         }
 
         /** Return the unique normalized tag list for a snippet. */
@@ -832,8 +841,11 @@
         function applyFilters() {
             let filtered = allSnippets;
 
-            // 1. Tool filter (single-select; model normalizes to
-            //    lowercase, so we compare on the same form).
+            // 1. Tool filter (single-select). The snippet's `tool`
+            //    and `activeTool` both preserve user-supplied casing
+            //    (the registry stores names verbatim), so this is a
+            //    straight exact-string match on whatever the radio
+            //    emitted.
             if (activeTool) {
                 filtered = filtered.filter((s) => toolKey(s) === activeTool);
             }

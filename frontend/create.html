@@ -290,7 +290,7 @@
                 </div>
                 <div class="field-row">
                     <div class="field">
-                    <label for="f-tool">Tools / Stack</label>
+                    <label for="f-tool">Tool</label>
                     <!-- <select> populated at load time from the Tool
                          registry (GET /api/snippets/tools/). If the
                          admin has added or deleted Tools since this
@@ -299,7 +299,7 @@
                          to a built-in list if the API is empty or
                          unreachable so the form is never blank. -->
                     <select id="f-tool" name="tool" required>
-                        <option value="" disabled>Select a tool or stack&hellip;</option>
+                        <option value="" disabled>Select a tool&hellip;</option>
                     </select>
                 </div>
                     <div class="field">
@@ -340,7 +340,7 @@
         // empty (no stacks have been added by the admin yet) so the
         // user understands why the dropdown is not populated.
         const EMPTY_REGISTRY_MESSAGE =
-            "No Stack or Tool Exists to Choose";
+            "No Tool Exists to Choose";
 
         function setStatus(msg, kind) {
             status.textContent = msg || "";
@@ -498,7 +498,7 @@
                 return;
             }
             if (!payload.tool) {
-                setStatus("Please choose a Tools / Stack value.", "err");
+                setStatus("Please choose a tool value.", "err");
                 return;
             }
 
@@ -595,7 +595,7 @@
             }
 
             toolSelect.disabled = false;
-            placeholder.textContent = "Select a tool or stack\u2026";
+            placeholder.textContent = "Select a tool\u2026";
             placeholder.disabled = true;
             placeholder.selected = true;
 
