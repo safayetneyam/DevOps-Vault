@@ -503,7 +503,13 @@
             select.disabled = false;
             placeholder.textContent = "Select a tool\u2026";
             placeholder.disabled = true;
-            placeholder.selected = true;
+            // Do NOT mark the placeholder as selected here — we
+            // haven't read the snippet yet, and a later
+            // `loadSnippet()` will pick the right registry option.
+            // Pre-selecting the placeholder would race against that
+            // pass and leave the dropdown showing "Select a tool…"
+            // when the snippet clearly has a known tool.
+            placeholder.selected = false;
 
             names.forEach((n) => {
                 const opt = document.createElement("option");
@@ -545,6 +551,15 @@
                 // edit it — but only after checking there's no
                 // case-fold duplicate already present.
                 const tool = (snippet.tool || "").trim();
+
+                // Wipe any prior `selected` (the placeholder may
+                // have been marked selected before we knew which
+                // tool the snippet is on) so the dropdown reflects
+                // exactly one chosen option after we set ours.
+                for (const opt of els.tool.options) {
+                    opt.selected = false;
+                }
+
                 let matched = false;
                 for (const opt of els.tool.options) {
                     if (opt.value.toLowerCase() === tool.toLowerCase()) {
@@ -645,14 +660,16 @@
             }
         });
 
-        // Populate the Tools/Stack <select> from the registry before
-        // loadSnippet() runs so the matching loop in loadSnippet can
-        // find the current value. loadSnippet still appends an option
-        // on miss (handles snippets saved against tools that were
-        // later deleted from the registry), so the order doesn't have
-        // to be strict — both fetches just need to finish.
-        loadToolOptions();
-        loadSnippet();
+        // Populate the tool <select> from the registry BEFORE
+        // loadSnippet() runs so its matching loop sees the real
+        // option list (not just the placeholder). Running these in
+        // parallel would race: loadSnippet could resolve its fetch
+        // first, find no matching option in an under-construction
+        // <select>, and append a duplicate fallback option that
+        // already exists in the registry.
+        // loadToolOptions().then(loadSnippet) keeps the DOM and
+        // the selection deterministic.
+        loadToolOptions().then(loadSnippet);
     })();
     </script>
 </body>
