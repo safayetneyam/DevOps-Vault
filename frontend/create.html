@@ -365,6 +365,77 @@
             return trimmed || null;
         }
 
+        /**
+         * Run a mutating fetch that carries the X-Vault-Password header
+         * and re-prompts the user with a warning if the server rejects
+         * the password (HTTP 403).
+         *
+         * The vault uses a custom header — it is NOT HTTP Basic auth —
+         * so we deliberately reject with 403 and no
+         * ``WWW-Authenticate`` header. Without that header the browser
+         * does NOT pop its native username/password dialog. This helper
+         * catches the 403, re-prompts with a "Wrong vault password"
+         * warning (still a single-password prompt, no username field),
+         * and keeps re-prompting until the user enters the correct
+         * password OR cancels the prompt (there is no attempt cap).
+         *
+         * Returns the parsed JSON body on success, ``null`` if the user
+         * cancelled the prompt, or throws on any non-403 server error.
+         */
+        async function sendVaultWrite({
+            url, body, method, passwordReason,
+            wrongReason = "Wrong vault password. Please try again.",
+            onWrong,                                        // optional: called after every 403 so the caller can flash an error while the next prompt is up
+            onCancel,                                       // optional: called once when the user cancels the prompt, so the caller can wipe the red wrong-password text
+        }) {
+            for (let attempt = 1; ; attempt++) {
+                const password = promptVaultPassword(
+                    attempt === 1
+                        ? passwordReason
+                        : (wrongReason + "\n\n" + passwordReason)
+                );
+                if (!password) {
+                    // User cancelled. Give the caller a chance to
+                    // wipe any red "Wrong vault password" text it
+                    // flashed via ``onWrong`` so the page doesn't
+                    // stay on the error state after a cancel.
+                    if (typeof onCancel === "function") {
+                        try { onCancel(); } catch (_) { /* ignore */ }
+                    }
+                    return null;
+                }
+
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-Vault-Password": password,
+                    },
+                    body: body !== undefined && body !== null
+                        ? JSON.stringify(body)
+                        : undefined,
+                });
+
+                if (res.ok) {
+                    return res.json();
+                }
+                if (res.status !== 403) {
+                    const txt = await res.text();
+                    throw new Error("HTTP " + res.status + ": " + txt);
+                }
+                // 403 = bad password. Let the caller flash an error
+                // in its UI *before* the next prompt appears so the
+                // user has feedback that the previous attempt failed.
+                if (typeof onWrong === "function") {
+                    try { onWrong(wrongReason); } catch (_) { /* ignore */ }
+                }
+                // No upper bound on attempts; the loop only exits via
+                // ``return null`` (user cancelled) or
+                // ``return res.json()`` (success).
+            }
+        }
+
         // Defense-in-depth: even though the model.save() normalizes,
         // we lowercase tags here too so any UI flow stays consistent
         // and the wire payload is canonical.
@@ -433,32 +504,32 @@
                 return;
             }
 
-            // Vault write-protection: collect the shared password and
-            // forward it via X-Vault-Password. The server returns 401
-            // on a wrong / missing password and we surface that to the
-            // user; clicking Cancel / leaving the field blank aborts.
-            const password = promptVaultPassword(
-                "Enter the vault password to save this snippet:"
-            );
-            if (!password) return;
-
+            // Vault write-protection: ``sendVaultWrite`` handles the
+            // password prompt AND the 403-retry-with-warning loop, so
+            // the only thing this handler controls is the form's
+            // button state and the success / failure status text.
             btn.disabled = true;
             setStatus("Saving...", "");
             try {
-                const res = await fetch(API, {
+                const created = await sendVaultWrite({
+                    url: API,
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "X-Vault-Password": password,
-                    },
-                    body: JSON.stringify(payload),
+                    body: payload,
+                    passwordReason:
+                        "Enter the vault password to save this snippet:",
+                    // Flash a red error in the status line on every
+                    // 403 so the user sees that the previous attempt
+                    // failed even while the next password prompt is up.
+                    onWrong: (msg) => setStatus(msg, "err"),
+                    // Wipe the red "Wrong vault password" text when
+                    // the user cancels the prompt, so the page
+                    // doesn't stay on the error state.
+                    onCancel: () => setStatus(""),
                 });
-                if (!res.ok) {
-                    const body = await res.json().catch(() => ({}));
-                    throw new Error(body.detail || ("HTTP " + res.status));
+                if (!created) {                    // user cancelled the prompt
+                    btn.disabled = false;
+                    return;
                 }
-                const created = await res.json();
                 sessionStorage.setItem("vault.just_created", "1");
                 setStatus("Saved \"" + created.title + "\". Redirecting...", "ok");
                 // Brief pause so the user sees the confirmation.

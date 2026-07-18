@@ -428,6 +428,91 @@
             return trimmed || null;                // empty string == cancel
         }
 
+        /**
+         * Run a mutating fetch that carries the X-Vault-Password header
+         * and re-prompts the user with a warning if the server rejects
+         * the password (HTTP 403).
+         *
+         * Why we re-prompt here instead of letting the browser handle it:
+         * the vault's authentication uses a CUSTOM header
+         * (``X-Vault-Password``), not HTTP Basic / Digest. If the server
+         * answered 401 with a ``WWW-Authenticate`` challenge, browsers
+         * would show their native username+password dialog (the
+         * "site is not private" / login popup the user objected to).
+         * The backend deliberately returns 403 with no
+         * ``WWW-Authenticate`` header; this helper is what catches that
+         * 403, shows a "Wrong vault password" warning INSIDE our own
+         * prompt (which only ever asks for the vault password, never a
+         * username), and keeps re-prompting until the user enters the
+         * correct password OR cancels the prompt (there is no attempt
+         * cap).
+         *
+         * Returns the parsed JSON body on success.
+         * Returns ``null`` if the user cancelled the prompt.
+         * Throws on any non-403 server error so the caller can show it.
+         */
+        async function sendVaultWrite({
+            url, body, method, passwordReason,
+            wrongReason = "Wrong vault password. Please try again.",
+            onWrong,                                        // optional: called after every 403 so the caller can flash an error while the next prompt is up
+            onCancel,                                       // optional: called once when the user cancels the prompt, so the caller can wipe the red wrong-password text
+        }) {
+            for (let attempt = 1; ; attempt++) {
+                const password = promptVaultPassword(
+                    attempt === 1
+                        ? passwordReason
+                        // Prepend the warning text so the user sees
+                        // "Wrong vault password" above the original
+                        // action-specific reason on retry attempts.
+                        : (wrongReason + "\n\n" + passwordReason)
+                );
+                if (!password) {
+                    // User cancelled. Give the caller a chance to
+                    // wipe any red "Wrong vault password" text it
+                    // flashed via ``onWrong`` so the page doesn't
+                    // stay on the error state after a cancel.
+                    if (typeof onCancel === "function") {
+                        try { onCancel(); } catch (_) { /* ignore */ }
+                    }
+                    return null;        // user cancelled
+                }
+
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "X-Vault-Password": password,
+                    },
+                    body: body !== undefined && body !== null
+                        ? JSON.stringify(body)
+                        : undefined,
+                });
+
+                if (res.ok) {
+                    return res.json();
+                }
+
+                // 403 = bad password. Any other status is a real
+                // error: surface it and stop retrying (we don't want
+                // to spam the user with prompts for, say, a 500
+                // Internal Error).
+                if (res.status !== 403) {
+                    const txt = await res.text();
+                    throw new Error("HTTP " + res.status + ": " + txt);
+                }
+                // Tell the caller to flash an error in its UI *before*
+                // the next prompt appears, so the user has feedback
+                // that the previous attempt failed. No upper bound on
+                // wrong-password attempts; the loop only exits via
+                // ``return null`` (user cancelled) or
+                // ``return res.json()`` (success).
+                if (typeof onWrong === "function") {
+                    try { onWrong(wrongReason); } catch (_) { /* ignore */ }
+                }
+            }
+        }
+
         /** Lowercased tool key (the API normalizes too). */
         function toolKey(snippet) {
             return (snippet.language || "").trim().toLowerCase() || "text";
@@ -551,34 +636,37 @@
             const ids = Array.from(checkedIds);
             if (ids.length === 0) return;
 
-            // The server enforces the shared vault password on every
-            // mutating endpoint, so we collect it up front and forward
-            // it via the X-Vault-Password header. The user gets a
-            // prompt (no yes/no confirmation): empty / cancelled → abort.
-            const password = promptVaultPassword(
-                "Enter the vault password to delete " + ids.length + " snippet(s):"
-            );
-            if (!password) return;
-
+            // ``sendVaultWrite`` owns the password prompt and the
+            // 403-retry-with-warning loop, so this handler only worries
+            // about the UI side: disable the button, restore on error.
             els.deleteBtn.disabled = true;
             const originalText = els.deleteBtn.textContent;
             els.deleteBtn.textContent = "Deleting...";
 
             try {
-                const res = await fetch(API_BATCH, {
+                const body = await sendVaultWrite({
+                    url: API_BATCH,
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "X-Vault-Password": password,
-                    },
-                    body: JSON.stringify({ ids: ids }),
+                    body: { ids: ids },
+                    passwordReason:
+                        "Enter the vault password to delete "
+                        + ids.length + " snippet(s):",
+                    onWrong: (msg) => setStatus(msg, "err"),
+                    // Wipe the red "Wrong vault password" text when
+                    // the user cancels the prompt.
+                    onCancel: () => setStatus(""),
                 });
-                if (!res.ok) {
-                    const txt = await res.text();
-                    throw new Error("HTTP " + res.status + ": " + txt);
+                if (!body) {
+                    // User cancelled the password prompt. Re-render
+                    // the button label from the current selection
+                    // (e.g. "Delete 3 Items") and re-enable it. We
+                    // deliberately do NOT clear the checkboxes — the
+                    // user only cancelled the delete, not the
+                    // selection itself, so the same selection can be
+                    // retried with a different password.
+                    updateDeleteButton();
+                    return;
                 }
-                const body = await res.json();
                 setStatus("Deleted " + (body.deleted || 0) + " snippet(s).", "ok");
                 // Clear selection and re-render.
                 checkedIds = new Set();
@@ -772,31 +860,37 @@
                     exit(true);
                     return;
                 }
-                // Collect the vault password up front. Per the spec, every
-                // save is gated (no session unlock), so we prompt each time.
-                const password = promptVaultPassword(
-                    "Enter the vault password to rename \"" + oldName
-                        + "\" -> \"" + newName + "\":"
-                );
-                if (!password) return;
+                // Per the spec, every save is gated (no session
+                // unlock), so we prompt each time. ``sendVaultWrite``
+                // re-prompts automatically with a "Wrong password"
+                // warning if the server rejects the password.
                 tickBtn.disabled = true;
                 crossBtn.disabled = true;
                 input.disabled = true;
                 try {
-                    const res = await fetch(API_BULK_RENAME, {
+                    const body = await sendVaultWrite({
+                        url: API_BULK_RENAME,
                         method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Accept": "application/json",
-                            "X-Vault-Password": password,
-                        },
-                        body: JSON.stringify({ old: oldName, new: newName }),
+                        body: { old: oldName, new: newName },
+                        passwordReason:
+                            "Enter the vault password to rename \"" + oldName
+                            + "\" -> \"" + newName + "\":",
+                        onWrong: (msg) => setStatus(msg, "err"),
+                        // Wipe the red "Wrong vault password" text
+                        // when the user cancels the prompt.
+                        onCancel: () => setStatus(""),
                     });
-                    if (!res.ok) {
-                        const txt = await res.text();
-                        throw new Error("HTTP " + res.status + ": " + txt);
+                    if (!body) {
+                        // User cancelled the password prompt. Roll
+                        // the row fully back to its original state
+                        // (restore the static name span, drop the
+                        // tick/cross inputs, and RE-SHOW the original
+                        // Edit/Delete icon buttons) so the sidebar
+                        // is not left in a half-edited limbo where
+                        // only the inline input is interactable.
+                        exit(true);
+                        return;
                     }
-                    const body = await res.json();
                     setStatus(
                         "Renamed \"" + oldName + "\" -> \"" + newName + "\" ("
                             + (body.updated || 0) + " snippet(s)).",
@@ -821,29 +915,23 @@
          * refresh both the sidebar and the table.
          */
         async function onDeleteToolClicked(toolName) {
-            // Replace yes/no with a password prompt. The server returns
-            // 401 if the password is wrong, so the user knows immediately.
-            const password = promptVaultPassword(
-                "Enter the vault password to delete ALL snippets under \""
-                    + toolName + "\":"
-            );
-            if (!password) return;
-
+            // ``sendVaultWrite`` re-prompts with a "Wrong password"
+            // warning when the server returns 403, so the user does
+            // not have to click the trash icon a second time to retry.
             try {
-                const res = await fetch(API_BULK_DELETE_TOOL, {
+                const body = await sendVaultWrite({
+                    url: API_BULK_DELETE_TOOL,
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "X-Vault-Password": password,
-                    },
-                    body: JSON.stringify({ tool: toolName }),
+                    body: { tool: toolName },
+                    passwordReason:
+                        "Enter the vault password to delete ALL snippets under \""
+                        + toolName + "\":",
+                    onWrong: (msg) => setStatus(msg, "err"),
+                    // Wipe the red "Wrong vault password" text when
+                    // the user cancels the prompt.
+                    onCancel: () => setStatus(""),
                 });
-                if (!res.ok) {
-                    const txt = await res.text();
-                    throw new Error("HTTP " + res.status + ": " + txt);
-                }
-                const body = await res.json();
+                if (!body) return;                  // user cancelled
                 setStatus(
                     "Deleted " + (body.deleted || 0) + " snippet(s) under \""
                         + toolName + "\".",

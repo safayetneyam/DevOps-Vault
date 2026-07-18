@@ -517,7 +517,7 @@ def test_create_without_password_returns_401(gated_client: APIClient) -> None:
         "tags": "auth",
     }
     response = gated_client.post("/api/snippets/", data=payload, format="json")
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.count() == 0
 
 
@@ -535,7 +535,7 @@ def test_create_with_wrong_password_returns_401(
     response = gated_client.post(
         "/api/snippets/", data=payload, format="json", **wrong_vault_headers
     )
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.count() == 0
 
 
@@ -598,7 +598,7 @@ def test_put_without_password_returns_401(gated_client: APIClient) -> None:
         data={"title": "Hacked", "code_body": "y", "language": "bash", "tags": ""},
         format="json",
     )
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     snippet.refresh_from_db()
     assert snippet.title == "Stays Put"
 
@@ -632,7 +632,7 @@ def test_delete_single_snippet_without_password_returns_401(
         tags="",
     )
     response = gated_client.delete(f"/api/snippets/{snippet.id}/")
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.filter(id=snippet.id).exists()
 
 
@@ -661,7 +661,7 @@ def test_batch_delete_without_password_returns_401(gated_client: APIClient) -> N
         data={"ids": [a.id]},
         format="json",
     )
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.filter(id=a.id).exists()
 
 
@@ -691,7 +691,7 @@ def test_bulk_rename_without_password_returns_401(gated_client: APIClient) -> No
         data={"old": "docker", "new": "podman"},
         format="json",
     )
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.filter(language="docker").exists()
 
 
@@ -724,7 +724,7 @@ def test_bulk_delete_tool_without_password_returns_401(
         data={"tool": "kubectl"},
         format="json",
     )
-    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_403_FORBIDDEN
     assert Snippet.objects.filter(language="kubectl").exists()
 
 
@@ -764,3 +764,39 @@ def test_bearer_fallback_header_works(
         HTTP_AUTHORIZATION=f"Bearer {TEST_PASSWORD}",
     )
     assert response.status_code == status.HTTP_201_CREATED
+
+
+@pytest.mark.django_db
+def test_wrong_password_response_has_no_authenticate_challenge(
+    gated_client: APIClient,
+) -> None:
+    """A rejected vault password must NOT include ``WWW-Authenticate``.
+
+    The custom ``X-Vault-Password`` header is NOT HTTP Basic auth, so
+    the server must not emit a ``WWW-Authenticate`` challenge header.
+    If we did, browsers would interpret that as an HTTP Basic auth
+    prompt and pop a native username/password dialog (the
+    "site is not private" popup users see), which the front-end cannot
+    suppress. The status must also be 403, not 401, for the same
+    reason — ``401`` carries the implicit challenge.
+    """
+    payload = {
+        "title": "Should Not Save",
+        "code_body": "x",
+        "language": "bash",
+        "tags": "",
+    }
+    response = gated_client.post(
+        "/api/snippets/",
+        data=payload,
+        format="json",
+        HTTP_X_VAULT_PASSWORD="definitely-not-the-right-password",
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    assert "WWW-Authenticate" not in response.headers
+    # Belt-and-braces: also assert the header is not lowercase,
+    # because HTTP headers are case-insensitive but Django's
+    # ``response.headers`` exposes the canonical case.
+    assert "WwW-Authenticate".lower() not in {
+        k.lower() for k in response.headers.keys()
+    }
