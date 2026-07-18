@@ -438,13 +438,23 @@
             border-top: 1px solid var(--code-border);
             margin: 0;
             padding: 1rem;
-            overflow-x: auto;
+            /* No horizontal scroll — long lines wrap inside the
+               viewport on desktop and mobile. The block is still
+               vertically scrollable when content is taller than the
+               viewport, thanks to the `overflow-y: auto` on the
+               containing panel. */
+            overflow-wrap: break-word;
+            word-break: break-word;
         }
 
         pre code {
             font-family: var(--mono);
             font-size: 0.9rem;
-            white-space: pre;
+            /* `pre-wrap` preserves newlines + leading whitespace
+               (the original `pre` behaviour) but wraps lines that
+               are wider than the container instead of forcing a
+               horizontal scrollbar. */
+            white-space: pre-wrap;
         }
 
         #detail-empty {
