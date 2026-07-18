@@ -73,28 +73,64 @@
         #status.ok { color: var(--success); }
         #status.err { color: var(--danger); }
 
-        /* 1fr (sidebar) / 3fr (main) layout */
+        /* 1fr (sidebar) / 3fr (main) layout. The header is full-bleed
+           (the body's `padding: 0 5%` insets both the header and
+           <main> by the same amount), so to make the cards span the
+           SAME width as the header we drop `main`'s horizontal padding
+           to 0. The cards keep their own inner padding so the text
+           still has breathing room. The grid gap stays modest so the
+           sidebar and main results area don't visually merge. */
         main {
             display: grid;
             grid-template-columns: 1fr 3fr;
             gap: 1.25rem;
-            padding: 1.25rem 1.5rem;
+            padding: 1.25rem 0;
             align-items: start;
             min-height: calc(100vh - 65px);
         }
 
         @media (max-width: 900px) {
             main { grid-template-columns: 1fr; }
-        }
 
-        /* Mobile (<= 600px): stack the header into three centered rows.
-           Row 1: "DevOps Vault" title (centered).
-           Row 2: snippet count (#status, centered, its own line).
-           Row 3: two ghost buttons (New Snippet, Admin), centered.
-           Tablet (601-900px) and desktop keep the original side-by-side
-           layout. #status, h1, and .header-actions are direct children
-           of <header>, so `order` reorders them within the column. */
-        @media (max-width: 600px) {
+            /* The sidebar and main cards sit almost flush — a tiny
+               2-3px gap between them and below the header so the
+               three blocks (header → filter → results) read as
+               distinct panels instead of one glued-together blob.
+               The gap is small enough that they still look like a
+               single visual group. */
+            main {
+                padding: 3px 0 3px;
+                gap: 3px;
+                min-height: 0;
+            }
+
+            aside.sidebar,
+            section.main {
+                margin: 0;
+            }
+
+            aside.sidebar {
+                padding: 0.85rem 1rem 0.85rem;
+                border-radius: 10px 10px 0 0;
+                border-bottom: 0;
+            }
+
+            section.main {
+                padding: 0.85rem 1rem;
+                border-radius: 0 0 10px 10px;
+                border-top: 1px solid var(--border);
+            }
+
+            .main-header { margin-bottom: 0.85rem; }
+
+            /* Mobile + Tablet (<= 900px): stack the header into three
+               centered rows.
+               Row 1: "DevOps Vault" title (centered).
+               Row 2: snippet count (#status, centered, its own line).
+               Row 3: two ghost buttons (New Snippet, Admin), centered.
+               #status, h1, and .header-actions are direct children
+               of <header>, so `order` reorders them within the column.
+               Desktop keeps the original side-by-side layout. */
             header {
                 flex-direction: column;
                 align-items: stretch;
@@ -118,6 +154,29 @@
                 flex-wrap: wrap;
                 gap: 0.6rem;
                 order: 3;
+            }
+        }
+
+        /* Mobile-only tweaks (<= 600px): font-size reductions for
+           snippet titles and detail-card title, since phones have
+           less horizontal room than tablets. The header-stack and
+           card-merge rules above already cover this range. */
+        @media (max-width: 600px) {
+            /* Slightly smaller snippet titles and detail-card title
+               so the cards feel less crowded on a phone. */
+            #results .title {
+                font-size: 0.92rem;
+            }
+
+            #detail-card-header .title {
+                font-size: 0.92rem;
+            }
+
+            /* Slightly smaller code inside the detail card so long
+               code lines still fit a phone viewport while remaining
+               legible. */
+            pre code {
+                font-size: 0.78rem;
             }
         }
 
