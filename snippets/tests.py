@@ -43,7 +43,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> APIClient:
     The legacy tests predate the password gate. We monkeypatch
     ``settings.VAULT_PASSWORD_HASH`` to ``""`` here so the gate's
     bypass branch fires and the tests can keep asserting on status
-    codes without ever sending an ``X-Vault-Password`` header.
+    codes without ever sending an ``X-Vault-Key`` header.
     Auth-gate tests use ``gated_client`` instead, which installs a
     real hash and exercises the real code path.
     """
@@ -67,13 +67,18 @@ def gated_client(monkeypatch: pytest.MonkeyPatch) -> APIClient:
 
 @pytest.fixture
 def vault_headers() -> dict[str, str]:
-    """Header kwargs accepted by APIClient methods (HTTP_X_VAULT_PASSWORD=...)."""
-    return {"HTTP_X_VAULT_PASSWORD": TEST_PASSWORD}
+    """Header kwargs accepted by APIClient methods (HTTP_X_VAULT_KEY=...).
+
+    The header is named ``X-Vault-Key`` (not ``X-Vault-Password``)
+    so Firefox's "save any header containing *password*" heuristic
+    never fires. See ``snippets/auth.py`` for the rationale.
+    """
+    return {"HTTP_X_VAULT_KEY": TEST_PASSWORD}
 
 
 @pytest.fixture
 def wrong_vault_headers() -> dict[str, str]:
-    return {"HTTP_X_VAULT_PASSWORD": TEST_PASSWORD_WRONG}
+    return {"HTTP_X_VAULT_KEY": TEST_PASSWORD_WRONG}
 
 
 @pytest.mark.django_db
@@ -978,7 +983,7 @@ def test_wrong_password_response_has_no_authenticate_challenge(
 ) -> None:
     """A rejected vault password must NOT include ``WWW-Authenticate``.
 
-    The custom ``X-Vault-Password`` header is NOT HTTP Basic auth, so
+    The custom ``X-Vault-Key`` header is NOT HTTP Basic auth, so
     the server must not emit a ``WWW-Authenticate`` challenge header.
     If we did, browsers would interpret that as an HTTP Basic auth
     prompt and pop a native username/password dialog (the
@@ -996,7 +1001,7 @@ def test_wrong_password_response_has_no_authenticate_challenge(
         "/api/snippets/",
         data=payload,
         format="json",
-        HTTP_X_VAULT_PASSWORD="definitely-not-the-right-password",
+        HTTP_X_VAULT_KEY="definitely-not-the-right-password",
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
     assert "WWW-Authenticate" not in response.headers

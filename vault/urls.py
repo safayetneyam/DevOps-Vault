@@ -2,13 +2,22 @@
 Top-level URL configuration for the Developer Vault.
 
 Routes:
-    /                 -> serves the single-page frontend (index.html)
-    /api/snippets/    -> DRF list/create endpoint (see snippets.urls)
-    /admin/           -> Django admin (optional)
-    /static/...       -> collected static assets (frontend, admin)
+    /                  -> serves the single-page frontend (index.html)
+    /api/snippets/     -> DRF list/create endpoint (see snippets.urls)
+    /create/           -> snippet create form (create.html)
+    /temp-admin/       -> custom admin UI (temp-admin.html)
+    /edit/<pk>/        -> snippet edit form (edit.html)
+    /static/...        -> collected static assets
+
+Note: ``/admin/`` (Django's stock admin) is intentionally NOT routed.
+The vault uses its own admin UI in ``frontend/temp-admin.html`` and
+the ``django.contrib.admin`` app is removed from ``INSTALLED_APPS`` —
+see ``vault/settings.py`` for the rationale (chiefly: dropping the
+session middleware that would otherwise attach a ``sessionid``
+cookie to every API response, which trips Firefox's password-save
+heuristic).
 """
 
-from django.contrib import admin
 from django.urls import include, path
 from django.views.generic import TemplateView
 
@@ -17,7 +26,6 @@ from django.views.generic import TemplateView
 # at the *static* path so Django can locate it after collectstatic
 # without needing a dedicated templates directory.
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("api/snippets/", include("snippets.urls")),
     path(
         "",

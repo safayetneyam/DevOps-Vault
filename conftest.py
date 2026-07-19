@@ -27,6 +27,13 @@ def vault_headers() -> dict[str, str]:
     """Return kwargs for ``APIClient.{get,post,...}(..., **vault_headers)``.
 
     The fixture shape matches how Django/DRF's test client accepts
-    header overrides: ``HTTP_X_VAULT_PASSWORD="…"``.
+    header overrides: ``HTTP_X_VAULT_KEY="…"``.
+
+    The header is named ``X-Vault-Key`` (not ``X-Vault-Password``)
+    because Firefox's built-in password heuristic scans any
+    header whose name contains ``password`` and offers to save its
+    value after a successful 2xx. The new name has no ``password``
+    token so the browser never asks the user to save the vault
+    password. See ``snippets/auth.py`` for the full rationale.
     """
-    return {"HTTP_X_VAULT_PASSWORD": TEST_PASSWORD}
+    return {"HTTP_X_VAULT_KEY": TEST_PASSWORD}

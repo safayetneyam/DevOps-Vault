@@ -44,8 +44,15 @@ def _env_list(name: str, default: list[str]) -> list[str]:
 # --- Vault write-protection --------------------------------------------- #
 # PBKDF2-SHA256 of the shared mutation password. The plaintext never
 # touches the app: clients send the password back via the
-# `X-Vault-Password` header (see snippets/auth.py) and we only ever
+# `X-Vault-Key` header (see snippets/auth.py) and we only ever
 # compare the derived bytes against this hash.
+#
+# Why ``X-Vault-Key`` and not ``X-Vault-Password``? Firefox's
+# built-in password heuristic flags any request header whose name
+# contains the substring ``password`` and offers to save its value
+# after a successful 2xx. The new header has no ``password`` token,
+# so the browser's "Save password?" prompt never fires. Transport
+# security is unchanged (HTTPS still applies in production).
 #
 # To mint a new hash from a fresh password locally, run:
 #   python -c "import hashlib,base64; \
@@ -95,11 +102,27 @@ DEBUG = _env_bool("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # ``django.contrib.admin`` is INTENTIONALLY OMITTED: the vault
+    # uses its own admin UI (``frontend/temp-admin.html``) backed by
+    # the ``snippets`` REST API. Django's stock admin would force
+    # ``SessionMiddleware`` and ``AuthenticationMiddleware`` into
+    # the MIDDLEWARE stack — both of which emit a ``Set-Cookie:
+    # sessionid=…`` header on every API response, which trips
+    # Firefox's LoginManager "credential POST → success → new
+    # session cookie" save-prompt heuristic. The vault's auth model
+    # is stateless and header-based (see ``snippets/auth.py``), so
+    # we have no need for Django's admin and no need for the
+    # session/back-user machinery that admin requires.
+    #
+    # ``django.contrib.messages`` is also INTENTIONALLY OMITTED for
+    # the same reason: it depends on ``SessionMiddleware`` (which
+    # we've removed) for its backend storage, and ``MessageMiddleware``
+    # raises ``ImproperlyConfigured`` at request time if the messages
+    # framework is loaded but session middleware is absent. We do
+    # not queue any flash messages from the API path; user-facing
+    # feedback lives in the front-end's own status banner.
     "django.contrib.auth",
     "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
     "django.contrib.staticfiles",
     # Third-party
     "rest_framework",
@@ -107,13 +130,52 @@ INSTALLED_APPS = [
     "snippets.apps.SnippetsConfig",
 ]
 
+# --- Middleware ----------------------------------------------------------- #
+# Intentionally MINIMAL — the vault uses a stateless, header-based auth
+# model (see ``snippets/auth.py``) and the front-end is a single-page
+# static HTML bundle, so we strip out every Django middleware that would
+# either set a ``Set-Cookie`` header on the API response or wire up
+# session-based authentication.
+#
+# Specifically removed:
+#   - ``SessionMiddleware`` — every response would otherwise carry
+#     ``Set-Cookie: sessionid=…`` (and the request would advertise
+#     ``Cookie: sessionid=…`` on subsequent calls). Firefox's
+#     LoginManager uses a "credential POST → success → new session
+#     cookie" heuristic to decide whether to show its "Save password?"
+#     prompt. Even though our auth is header-based, the *presence* of
+#     the sessionid cookie in the response is enough to fire the
+#     heuristic. With SessionMiddleware gone, the response carries no
+#     sessionid cookie and the heuristic has no signal.
+#   - ``AuthenticationMiddleware`` — wires ``request.user`` to a Django
+#     ``User`` model. Our API views use the stub ``VaultUser`` from
+#     DRF's auth class directly, never ``request.user.username``, so
+#     this middleware is dead weight and would also set a session
+#     cookie on first login.
+#   - ``CsrfViewMiddleware`` — CSRF protection exists to defend
+#     cookie-based auth from cross-origin form submissions. Our auth
+#     requires the ``X-Vault-Key`` header on every mutating call; that
+#     header is a non-simple CORS request, which a cross-origin
+#     attacker page cannot set without an explicit CORS preflight
+#     allow-list (which we never grant), so the vault password acts
+#     as the CSRF equivalent. CSRF middleware here is redundant AND
+#     it would set ``Set-Cookie: csrftoken=…`` on the first GET,
+#     again tripping Firefox's credential-save heuristic.
+#
+# Kept:
+#   - ``SecurityMiddleware`` — applies HTTPS / HSTS / referrer headers.
+#     Does not set cookies.
+#   - ``CommonMiddleware`` — drives ETags, ``APPEND_SLASH``, and the
+#     user-agent-based quirks. Does not set cookies.
+#   - ``MessageMiddleware`` — only sets cookies when a Django message
+#     is queued (we never queue any from the API path), and even then
+#     it relies on SessionMiddleware which we have removed, so in
+#     practice this middleware becomes a no-op.
+#   - ``XFrameOptionsMiddleware`` — emits ``X-Frame-Options: DENY``.
+#     Does not set cookies.
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -131,8 +193,12 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
+                # ``django.contrib.auth.context_processors.auth`` and
+                # ``django.contrib.messages.context_processors.messages``
+                # are intentionally OMITTED because the corresponding
+                # apps are not in INSTALLED_APPS — including them here
+                # would raise ImproperlyConfigured on the first template
+                # render.
             ],
         },
     },

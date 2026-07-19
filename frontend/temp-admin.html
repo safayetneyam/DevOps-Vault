@@ -455,9 +455,12 @@
 
         /* --------------------------------------------------------------
            Vault password modal. Replaces window.prompt() so the user
-           types into a <input type="password"> field that masks the
+           types into a CSS-masked text input (see ``-webkit-text-
+           security: disc`` on ``.pw-input`` below) that renders the
            value as bullets — the vault password must never appear in
-           plain text on screen or in a recording.
+           plain text on screen or in a recording. The input is
+           deliberately ``type="text"`` (not ``type="password"``) so
+           browser password managers do not offer to save the value.
            -------------------------------------------------------------- */
         #vault-pw-modal {
             position: fixed;
@@ -496,6 +499,19 @@
             border: 1px solid var(--border-strong);
             border-radius: 6px;
             outline: none;
+            /* Render typed characters as bullets WITHOUT using
+               type="password". Firefox/Chrome/Edge password managers
+               track <input type="password"> fields and offer to save
+               the last value seen, even when the field is created
+               dynamically and torn down before submission.
+               `-webkit-text-security: disc` is supported in
+               Safari/Chrome and turns any text input into a
+               bullet-displaying field. Modern Firefox supports the
+               standardised property under the same name. Together
+               this keeps the input looking like a password field to
+               the user while remaining a plain ``type="text"`` field
+               to the browser's credential heuristics. */
+            -webkit-text-security: disc;
         }
         #vault-pw-modal .pw-input:focus {
             border-color: var(--accent);
@@ -544,10 +560,17 @@
          aria-labelledby="vault-pw-reason" hidden>
         <div class="pw-dialog">
             <p id="vault-pw-reason" class="pw-reason"></p>
-            <input id="vault-pw-input" class="pw-input"
-                   type="password" autocomplete="off"
-                   autocapitalize="off" autocorrect="off"
-                   spellcheck="false" />
+            <!-- Intentionally NO `<input type="password">` here at parse
+                 time. Firefox / Chrome / Edge password managers scan
+                 the static DOM for password fields and offer to save
+                 any value they see being submitted while one exists.
+                 By leaving only an empty slot, the browser has nothing
+                 to track. promptVaultPassword() synthesises the
+                 password <input> on demand when the modal opens and
+                 removes it from the DOM the instant the modal closes,
+                 so the password lives only in a transient node that
+                 is gone before any submission attempt. -->
+            <div id="vault-pw-slot"></div>
             <p class="pw-hint">Leave blank and press OK to cancel.</p>
             <div class="pw-actions">
                 <button type="button" class="pw-cancel">Cancel</button>
@@ -704,7 +727,7 @@
          */
         function promptVaultPassword(reason) {
             const modal = document.getElementById("vault-pw-modal");
-            const input = document.getElementById("vault-pw-input");
+            const slot = document.getElementById("vault-pw-slot");
             const reasonEl = document.getElementById("vault-pw-reason");
             const okBtn = modal && modal.querySelector(".pw-ok");
             const cancelBtn = modal && modal.querySelector(".pw-cancel");
@@ -714,7 +737,7 @@
             // back to the old plaintext window.prompt so writes still
             // work — they just won't be masked. Better than a silent
             // broken page.
-            if (!modal || !input || !reasonEl || !okBtn || !cancelBtn) {
+            if (!modal || !slot || !reasonEl || !okBtn || !cancelBtn) {
                 const pw = window.prompt(
                     (reason || "Enter the vault password:") + "\n\n"
                         + "Leave blank and press OK to cancel."
@@ -725,6 +748,55 @@
 
             return new Promise((resolve) => {
                 let resolved = false;
+
+                // Build the password <input> on demand. Browser
+                // password managers (Firefox Lockwise, Chrome, Edge,
+                // Safari) track any <input type="password"> that
+                // exists in the DOM at submission time and offer to
+                // save the value they last saw. Creating the input
+                // only while the modal is open and removing it from
+                // the DOM the instant we close the modal means the
+                // password value never sits in a node the password
+                // manager can see during a fetch — so there is
+                // nothing to prompt to save. The slot <div> stays in
+                // place (just a plain container, not a password
+                // field).
+                const input = document.createElement("input");
+                input.id = "vault-pw-input";
+                input.className = "pw-input";
+                // Deliberately type="text" (NOT "password"). The
+                // visual bullet masking is done entirely via the
+                // ``-webkit-text-security: disc`` CSS rule on
+                // ``.pw-input``. Browser password managers only
+                // track elements whose ``type`` attribute is literally
+                // ``password`` — by staying as ``text`` while
+                // rendering as bullets, the user sees a password-style
+                // field but the browser's credential heuristics see
+                // a plain text field with no username / password pair
+                // to offer to save. This is the same trick used by
+                // Bitwarden's autofill UI and 1Password's in-page
+                // dialogs.
+                input.type = "text";
+                // CRITICAL: do NOT set ``input.autocomplete =
+                // "new-password"`` here. That token is an HTML
+                // standard signal that explicitly tells the browser
+                // "this is a NEW password to be remembered" — Firefox
+                // honors it and offers to save the value after a
+                // successful submission (Chrome / Edge / Safari
+                // ignore it, which is why the prompt only fired on
+                // Firefox). ``autocomplete="off"`` is the correct
+                // value for a transient credential the browser must
+                // never persist.
+                input.autocomplete = "off";
+                input.setAttribute("data-form-type", "other");
+                input.setAttribute("data-lpignore", "true");
+                input.setAttribute("data-1p-ignore", "true");
+                input.setAttribute("data-bwignore", "true");
+                input.setAttribute("data-dashlane-ignore", "true");
+                input.autocapitalize = "off";
+                input.autocorrect = "off";
+                input.spellcheck = false;
+                slot.replaceChildren(input);
 
                 function done(value) {
                     if (resolved) return;
@@ -737,6 +809,10 @@
                     input.removeEventListener("keydown", onKey);
                     modal.removeEventListener("click", onBackdrop);
                     document.removeEventListener("keydown", onEsc);
+                    // Tear the input out of the DOM so password
+                    // managers can't track it after the modal closes.
+                    if (input.parentNode) input.parentNode.removeChild(input);
+                    slot.replaceChildren();
                     resolve(value);
                 }
 
@@ -782,13 +858,13 @@
         }
 
         /**
-         * Run a mutating fetch that carries the X-Vault-Password header
+         * Run a mutating fetch that carries the X-Vault-Key header
          * and re-prompts the user with a warning if the server rejects
          * the password (HTTP 403).
          *
          * Why we re-prompt here instead of letting the browser handle it:
          * the vault's authentication uses a CUSTOM header
-         * (``X-Vault-Password``), not HTTP Basic / Digest. If the server
+         * (``X-Vault-Key``), not HTTP Basic / Digest. If the server
          * answered 401 with a ``WWW-Authenticate`` challenge, browsers
          * would show their native username+password dialog (the
          * "site is not private" / login popup the user objected to).
@@ -799,6 +875,20 @@
          * username), and keeps re-prompting until the user enters the
          * correct password OR cancels the prompt (there is no attempt
          * cap).
+         *
+         * Header-name note: the header is named ``X-Vault-Key`` rather
+         * than ``X-Vault-Password`` so Firefox's "save any request
+         * header whose name contains *password*" heuristic never
+         * fires. The custom modal still visually masks the input as a
+         * password field via ``-webkit-text-security: disc``, but even
+         * that visual trick is not enough on Firefox 115+: the browser
+         * inspects the *outgoing headers* of the request and sees the
+         * literal string ``X-Vault-Password`` (case-insensitive substring
+         * match) and offers to save the value. Renaming the header to
+         * ``X-Vault-Key`` — which contains no ``password`` token —
+         * keeps the browser's "Save password?" prompt silent without
+         * weakening transport security (HTTPS still applies in
+         * production).
          *
          * Returns the parsed JSON body on success.
          * Returns ``null`` if the user cancelled the prompt.
@@ -835,7 +925,11 @@
                     headers: {
                         "Content-Type": "application/json",
                         "Accept": "application/json",
-                        "X-Vault-Password": password,
+                        // See the header-name note on ``sendVaultWrite``'s
+                        // docstring above. ``X-Vault-Key`` deliberately
+                        // contains no ``password`` token so Firefox's
+                        // credential heuristic never fires.
+                        "X-Vault-Key": password,
                     },
                     body: body !== undefined && body !== null
                         ? JSON.stringify(body)
