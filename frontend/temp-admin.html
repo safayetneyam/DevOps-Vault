@@ -43,6 +43,10 @@
             align-items: center;
             justify-content: space-between;
             box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+            /* Anchor for the absolutely-positioned #status so it
+               can sit visually centred between the title and the
+               home button on wide screens. */
+            position: relative;
         }
 
         header h1 {
@@ -64,6 +68,25 @@
             font-size: 0.85rem;
             color: var(--text-soft);
             min-height: 1.2em;
+            /* Hidden by default: the header on first load should
+               show only the title and the home button (no blank
+               reserved space for an empty message). setStatus()
+               sets display="" when there's a real message and
+               display="none" again when it auto-dismisses. */
+            display: none;
+            /* On wide screens the status line floats in the
+               middle of the header (between the title on the
+               left and the home button on the right). The
+               narrow-screen media query flips it back into
+               the normal flow so it stacks vertically with
+               the title and the button. */
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            max-width: 60%;
+            pointer-events: none;
         }
         #status.ok { color: var(--success); }
         #status.err { color: var(--danger); }
@@ -390,6 +413,46 @@
             #tools-sidebar { position: static; max-height: none; }
         }
 
+        /* On narrow screens the header switches from the
+           "title | status | home" side-by-side layout to a
+           vertical stack: title first, status message
+           underneath, then the home button. The status is
+           un-anchored from its absolute positioning so it
+           flows in the natural document order between them. */
+        @media (max-width: 600px) {
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.6rem;
+                padding: 0.85rem 1rem;
+            }
+
+            header h1 {
+                text-align: center;
+                font-size: 1.25rem;
+            }
+
+            .header-actions {
+                justify-content: center;
+                flex-wrap: wrap;
+                gap: 0.6rem;
+            }
+
+            #status {
+                position: static;
+                transform: none;
+                text-align: center;
+                max-width: none;
+                pointer-events: auto;
+                /* The mobile layout uses the normal document flow
+                   (no absolute positioning), so setStatus() needs
+                   to swap display between "" and "none" so the
+                   message appears in the right spot without ever
+                   reserving blank vertical space. */
+                display: none;
+            }
+        }
+
         /* --------------------------------------------------------------
            Vault password modal. Replaces window.prompt() so the user
            types into a <input type="password"> field that masks the
@@ -499,8 +562,14 @@
                 DevOps <span>Vault</span>
             </a>
         </h1>
+        <!-- Status lives OUTSIDE .header-actions so it can be
+             absolutely centred in the header bar on wide screens
+             without being grouped with the home button. The
+             narrow-screen media query flips it back into the
+             normal flow so the title, status, and home button
+             stack vertically in that order. -->
+        <span id="status" aria-live="polite"></span>
         <div class="header-actions">
-            <span id="status" aria-live="polite"></span>
             <a href="/" class="ghost" role="button">&larr; Home</a>
         </div>
     </header>
@@ -577,9 +646,52 @@
         // Set of currently-checked snippet IDs (across all groups).
         let checkedIds = new Set();
 
+        // Single in-flight status timer so successive setStatus()
+        // calls don't leave behind a stale clearTimeout() that
+        // erases a fresher message. Reset on every call.
+        // ``lastStatusMsg`` tracks what we most recently displayed
+        // so the timer callback can decide whether it's still safe
+        // to auto-dismiss (a newer setStatus() call should always
+        // win over a stale timer that hasn't been cancelled yet).
+        let statusClearTimer = null;
+        let lastStatusMsg = null;
+
         function setStatus(msg, kind) {
             els.status.textContent = msg || "";
             els.status.className = kind || "";
+            // The #status element has display:none by default (see CSS)
+            // so the header on first load shows only the title and the
+            // home button. When a real message arrives we MUST set an
+            // explicit display value (here we use "inline-block") — if
+            // we cleared the inline style with `style.display = ""` the
+            // CSS default `display: none` would take over and the
+            // message would never appear. Hide again after auto-clear.
+            els.status.style.display = msg ? "inline-block" : "none";
+            if (statusClearTimer !== null) {
+                clearTimeout(statusClearTimer);
+                statusClearTimer = null;
+            }
+            lastStatusMsg = msg || null;
+            // Auto-dismiss success / info messages after 5 seconds so
+            // the header doesn't stay cluttered with confirmation text
+            // ("Deleted N snippet(s)." etc.) after the action is done.
+            // Errors stay until the next setStatus() so the user has
+            // time to read them and act on the failure.
+            if (msg && kind !== "err") {
+                statusClearTimer = setTimeout(() => {
+                    // Only clear if our message is still the latest one
+                    // shown — guards against a race where a newer
+                    // setStatus() call has replaced it (e.g. an error
+                    // reported after a successful action).
+                    if (lastStatusMsg === msg) {
+                        els.status.textContent = "";
+                        els.status.className = "";
+                        els.status.style.display = "none";
+                        lastStatusMsg = null;
+                    }
+                    statusClearTimer = null;
+                }, 5000);
+            }
         }
 
         /**
@@ -897,10 +1009,12 @@
                     passwordReason:
                         "Enter the vault password to delete "
                         + ids.length + " snippet(s):",
-                    onWrong: (msg) => setStatus(msg, "err"),
-                    // Wipe the red "Wrong vault password" text when
-                    // the user cancels the prompt.
-                    onCancel: () => setStatus(""),
+                    // The vault password modal already displays the
+                    // "Wrong vault password" warning inside itself
+                    // on every retry, so the page-level status line
+                    // is intentionally left untouched for password
+                    // failures — only success / failure of the final
+                    // request is reported there (by the caller below).
                 });
                 if (!body) {
                     // User cancelled the password prompt. Re-render
@@ -914,7 +1028,12 @@
                     return;
                 }
                 setStatus("Deleted " + (body.deleted || 0) + " snippet(s).", "ok");
-                // Clear selection and re-render.
+                // Clear selection and re-render. The setStatus() call
+                // above started the 5-second auto-dismiss timer; we
+                // rely on the loadAndRender() guard below (see comment
+                // in loadAndRender's catch) to NOT overwrite this
+                // fresh success banner with a persistent "Error" if
+                // the post-delete re-fetch happens to fail.
                 checkedIds = new Set();
                 await loadAndRender();
             } catch (err) {
@@ -944,7 +1063,17 @@
                 p.className = "error";
                 p.textContent = "Failed to load snippets: " + err.message;
                 els.tableWrap.appendChild(p);
-                setStatus("Error", "err");
+                // Only surface the load failure to the status line if
+                // there's no fresh success message currently displayed.
+                // Otherwise the post-action "Deleted N snippet(s)."
+                // banner (which is on a 5-second auto-dismiss) would be
+                // instantly replaced by an "Error" message that never
+                // clears — making it look like the success message is
+                // stuck. We suppress the overwrite here and rely on
+                // the inline error in the table area for visibility.
+                if (!lastStatusMsg || lastStatusMsg === "" || lastStatusMsg === "Error") {
+                    setStatus("Error", "err");
+                }
             }
             // Tool/Stack sidebar is driven by the Tool registry, NOT
             // by the snippets table — that way a brand-new entry the
@@ -1244,12 +1373,14 @@
                         method: "POST",
                         body: { name: newName },
                         passwordReason:
-                            "Enter the vault password to create new tool \""
-                            + newName + "\":",
-                        onWrong: (msg) => setStatus(msg, "err"),
-                        // Wipe the red "Wrong vault password" text
-                        // when the user cancels.
-                        onCancel: () => setStatus(""),
+                        "Enter the vault password to create new tool \""
+                        + newName + "\":",
+                    // The vault password modal already displays the
+                    // "Wrong vault password" warning inside itself
+                    // on every retry, so the page-level status line
+                    // is intentionally left untouched for password
+                    // failures — only success / failure of the final
+                    // request is reported there (by the caller below).
                     });
                     if (!body) {
                         // User cancelled the prompt. Re-enable the
@@ -1402,12 +1533,14 @@
                         method: "POST",
                         body: { old: oldName, new: newName },
                         passwordReason:
-                            "Enter the vault password to rename \"" + oldName
-                            + "\" -> \"" + newName + "\":",
-                        onWrong: (msg) => setStatus(msg, "err"),
-                        // Wipe the red "Wrong vault password" text
-                        // when the user cancels the prompt.
-                        onCancel: () => setStatus(""),
+                        "Enter the vault password to rename \"" + oldName
+                        + "\" -> \"" + newName + "\":",
+                    // The vault password modal already displays the
+                    // "Wrong vault password" warning inside itself
+                    // on every retry, so the page-level status line
+                    // is intentionally left untouched for password
+                    // failures — only success / failure of the final
+                    // request is reported there (by the caller below).
                     });
                     if (!body) {
                         // User cancelled the password prompt. Roll
@@ -1425,8 +1558,11 @@
                             + (body.updated || 0) + " snippet(s)).",
                         "ok"
                     );
-                    // Refresh from the server so both sidebar and table
-                    // reflect the new tool name.
+                    // Refresh from the server so both sidebar and
+                    // table reflect the new tool name. loadAndRender()
+                    // is now aware of the fresh success banner above
+                    // and will NOT clobber it with "Error" if its
+                    // own re-fetch fails.
                     await loadAndRender();
                 } catch (err) {
                     setStatus("Rename failed: " + err.message, "err");
@@ -1458,10 +1594,12 @@
                     passwordReason:
                         "Enter the vault password to delete tool \""
                         + toolName + "\" and all its snippets:",
-                    onWrong: (msg) => setStatus(msg, "err"),
-                    // Wipe the red "Wrong vault password" text when
-                    // the user cancels the prompt.
-                    onCancel: () => setStatus(""),
+                    // The vault password modal already displays the
+                    // "Wrong vault password" warning inside itself
+                    // on every retry, so the page-level status line
+                    // is intentionally left untouched for password
+                    // failures — only success / failure of the final
+                    // request is reported there (by the caller below).
                 });
                 if (!body) return;                  // user cancelled
                 setStatus(
@@ -1469,7 +1607,10 @@
                         + (body.deleted_snippets || 0) + " snippet(s).",
                     "ok"
                 );
-                // Clear any selections that just got nuked.
+                // Clear any selections that just got nuked. The
+                // loadAndRender() catch block has a guard that
+                // won't clobber this fresh success banner with
+                // "Error" if the follow-up re-fetch fails.
                 checkedIds = new Set();
                 await loadAndRender();
             } catch (err) {

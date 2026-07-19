@@ -805,7 +805,7 @@
             // prompt AND the 403-retry-with-warning loop, so this
             // handler only owns the save-button state and status text.
             els.saveBtn.disabled = true;
-            setStatus("Saving...", "");
+            setStatus("Editing...", "");
             try {
                 const updated = await sendVaultWrite({
                     url: API_DETAIL,
@@ -813,17 +813,19 @@
                     body: payload,
                     passwordReason:
                         "Enter the vault password to save changes:",
-                    // Flash a red error in the status line on every
-                    // 403 so the user sees that the previous attempt
-                    // failed even while the next password prompt is up.
-                    onWrong: (msg) => setStatus(msg, "err"),
-                    // Wipe the red "Wrong vault password" text when
-                    // the user cancels the prompt, so the page
-                    // doesn't stay on the error state.
-                    onCancel: () => setStatus(""),
+                    // The vault password modal already displays the
+                    // "Wrong vault password" warning inside itself
+                    // on every retry, so the page-level status line
+                    // is intentionally left untouched for password
+                    // failures — only success / failure of the final
+                    // request is reported there (by the caller below).
                 });
                 if (!updated) {                    // user cancelled the prompt
                     els.saveBtn.disabled = false;
+                    // Clear the "Editing..." status so cancelling
+                    // the password prompt doesn't leave the page
+                    // looking like a save is still in progress.
+                    setStatus("", "");
                     return;
                 }
                 setStatus(
